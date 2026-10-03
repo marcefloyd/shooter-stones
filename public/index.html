@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Shooter Stones: combate táctico multijugador en una arena 3D"
+    />
+    <title>Shooter Stones</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <canvas id="game-canvas" aria-label="Arena 3D"></canvas>
+
+    <main id="main-menu" class="main-menu">
+      <div class="menu-grid" aria-hidden="true"></div>
+      <div class="menu-content">
+        <section class="title-block" aria-labelledby="game-title">
+          <p class="menu-eyebrow"><span></span> COMBAT ZONE // ONLINE</p>
+          <h1 id="game-title">SHOOTER<br /><span>STONES</span></h1>
+          <p class="tagline">PIENSA RÁPIDO. MUÉVETE TÁCTICO. SOBREVIVE.</p>
+          <button id="play-button" class="play-button" type="button">
+            <span>JUGAR</span><span aria-hidden="true">→</span>
+          </button>
+          <button id="practice-button" class="practice-button" type="button">
+            PRACTICAR CONTRA IA
+          </button>
+          <p class="menu-hint">PARTIDA 1 VS 1 · 4 FASES DE 1 MINUTO</p>
+        </section>
+
+        <aside class="menu-controls" aria-label="Controles del juego">
+          <p class="menu-controls-title">CONTROLES DE COMBATE</p>
+          <div class="menu-control-row">
+            <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Moverse</span>
+          </div>
+          <div class="menu-control-row"><kbd>MOUSE</kbd><span>Mirar alrededor</span></div>
+          <div class="menu-control-row"><kbd>SHIFT</kbd><span>Correr</span></div>
+          <div class="menu-control-row"><kbd>CTRL</kbd><span>Agacharse</span></div>
+          <div class="menu-control-row"><kbd>ESPACIO</kbd><span>Saltar</span></div>
+          <div class="menu-control-row"><kbd>E</kbd><span>Recoger armas</span></div>
+          <div class="menu-control-row"><kbd>Q</kbd><span>Soltar arma actual</span></div>
+          <div class="menu-control-row"><kbd>V</kbd><span>Alternar arma / cuchillo</span></div>
+          <div class="menu-control-row"><kbd>RMB</kbd><span>Mira 1.ª persona con zoom</span></div>
+          <div class="menu-control-row"><kbd>LMB</kbd><span>Disparar / lanzar / atacar</span></div>
+        </aside>
+      </div>
+      <footer class="menu-footer">
+        <span>SHOOTER STONES</span>
+        <span>EL CAMPO DE BATALLA TE ESPERA</span>
+      </footer>
+    </main>
+
+    <div id="game-ui" class="game-ui" aria-hidden="true">
+      <div class="vignette" aria-hidden="true"></div>
+      <div id="hit-flash" class="hit-flash" aria-hidden="true"></div>
+      <div class="hud">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <div>
+            <h2>Shooter Stones</h2>
+            <p class="eyebrow">ARENA // 1V1</p>
+          </div>
+        </div>
+        <p id="connection-status" class="connection-status" role="status">
+          Conectando al servidor...
+        </p>
+        <div class="controls">
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Mover</span><kbd>MOUSE</kbd><span>Mirar</span></p>
+          <p><kbd>SHIFT</kbd><span>Correr</span><kbd>CTRL</kbd><span>Agacharse</span><kbd>ESPACIO</kbd><span>Saltar</span></p>
+          <p><kbd>E</kbd><span>Recoger</span><kbd>Q</kbd><span>Soltar arma</span><kbd>V</kbd><span>Arma / cuchillo</span></p>
+          <p><kbd>RMB</kbd><span>Apuntar</span><kbd>LMB</kbd><span>Disparar / lanzar / atacar</span></p>
+        </div>
+      </div>
+      <div id="round-status" class="round-status" aria-live="polite">
+        ESPERANDO AL SEGUNDO JUGADOR
+      </div>
+      <button
+        id="sound-toggle"
+        class="sound-toggle"
+        type="button"
+        aria-label="Silenciar sonido"
+      >
+        SONIDO: ON
+      </button>
+      <div class="reticle" aria-hidden="true"></div>
+      <p id="pickup-prompt" class="pickup-prompt" hidden>
+        <kbd>E</kbd> RECOGER ARMA
+      </p>
+      <div id="round-result" class="round-result" hidden role="status"></div>
+      <section class="health-panel" aria-label="Estado del jugador">
+        <div class="health-heading">
+          <span class="eyebrow">VITALIDAD</span>
+          <strong id="health-value">100 <small>HP</small></strong>
+        </div>
+        <progress class="health-bar" max="100" value="100" aria-label="Vida"></progress>
+        <div class="grenade-inventory">
+          <span>GRANADAS</span>
+          <strong><span id="grenade-count">0</span><small>×</small></strong>
+          <kbd>LMB LANZAR</kbd>
+        </div>
+        <div class="weapon-inventory">
+          <span id="weapon-status">SIN ARMA</span>
+          <strong>
+            <span id="weapon-ammo">0</span><small> / <span id="weapon-capacity">0</span></small>
+          </strong>
+        </div>
+        <p>COMBATIENTE <span>01</span></p>
+      </section>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/game.js"></script>
+  </body>
+</html>
