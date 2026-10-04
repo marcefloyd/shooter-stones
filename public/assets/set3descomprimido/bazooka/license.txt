@@ -1,0 +1,11 @@
+Model Information:
+* title:	Bazooka
+* source:	https://sketchfab.com/3d-models/bazooka-8c3477b2620a4b088504bdc08c99f5cc
+* author:	Alex-YT (https://sketchfab.com/Alex-YT)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Bazooka" (https://sketchfab.com/3d-models/bazooka-8c3477b2620a4b088504bdc08c99f5cc) by Alex-YT (https://sketchfab.com/Alex-YT) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

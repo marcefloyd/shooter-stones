@@ -38,6 +38,8 @@
           <div class="menu-control-row"><kbd>SHIFT</kbd><span>Correr</span></div>
           <div class="menu-control-row"><kbd>CTRL</kbd><span>Agacharse</span></div>
           <div class="menu-control-row"><kbd>ESPACIO</kbd><span>Saltar</span></div>
+          <div class="menu-control-row"><kbd>F</kbd><span>Rodar</span></div>
+          <div class="menu-control-row"><kbd>ALT</kbd><span>Ver personaje de frente</span></div>
           <div class="menu-control-row"><kbd>E</kbd><span>Recoger armas</span></div>
           <div class="menu-control-row"><kbd>Q</kbd><span>Soltar arma actual</span></div>
           <div class="menu-control-row"><kbd>V</kbd><span>Alternar arma / cuchillo</span></div>
@@ -68,6 +70,7 @@
         <div class="controls">
           <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Mover</span><kbd>MOUSE</kbd><span>Mirar</span></p>
           <p><kbd>SHIFT</kbd><span>Correr</span><kbd>CTRL</kbd><span>Agacharse</span><kbd>ESPACIO</kbd><span>Saltar</span></p>
+          <p><kbd>F</kbd><span>Rodar</span><kbd>ALT</kbd><span>Vista frontal</span></p>
           <p><kbd>E</kbd><span>Recoger</span><kbd>Q</kbd><span>Soltar arma</span><kbd>V</kbd><span>Arma / cuchillo</span></p>
           <p><kbd>RMB</kbd><span>Apuntar</span><kbd>LMB</kbd><span>Disparar / lanzar / atacar</span></p>
         </div>
@@ -94,11 +97,6 @@
           <strong id="health-value">100 <small>HP</small></strong>
         </div>
         <progress class="health-bar" max="100" value="100" aria-label="Vida"></progress>
-        <div class="grenade-inventory">
-          <span>GRANADAS</span>
-          <strong><span id="grenade-count">0</span><small>×</small></strong>
-          <kbd>LMB LANZAR</kbd>
-        </div>
         <div class="weapon-inventory">
           <span id="weapon-status">SIN ARMA</span>
           <strong>
@@ -109,7 +107,15 @@
       </section>
     </div>
 
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
     <script src="/socket.io/socket.io.js"></script>
-    <script type="module" src="/game.js?v=20261004-2"></script>
+    <script type="module" src="/game.js?v=20261004-19"></script>
   </body>
 </html>

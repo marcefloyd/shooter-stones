@@ -1,0 +1,11 @@
+Model Information:
+* title:	LowPoly Remington 11-87
+* source:	https://sketchfab.com/3d-models/lowpoly-remington-11-87-7d4d5a3ddcb4486b8c6820bc3e21e861
+* author:	Jesper.Purizaga (https://sketchfab.com/Jesper.Purizaga)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "LowPoly Remington 11-87" (https://sketchfab.com/3d-models/lowpoly-remington-11-87-7d4d5a3ddcb4486b8c6820bc3e21e861) by Jesper.Purizaga (https://sketchfab.com/Jesper.Purizaga) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

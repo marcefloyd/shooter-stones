@@ -1,0 +1,11 @@
+Model Information:
+* title:	Barcode Machete
+* source:	https://sketchfab.com/3d-models/barcode-machete-e3e3efb43edd4257afca9ee227c5299e
+* author:	milacetious (https://sketchfab.com/milacetious)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Barcode Machete" (https://sketchfab.com/3d-models/barcode-machete-e3e3efb43edd4257afca9ee227c5299e) by milacetious (https://sketchfab.com/milacetious) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

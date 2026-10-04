@@ -1,0 +1,11 @@
+Model Information:
+* title:	SOLDADO-Personaje
+* source:	https://sketchfab.com/3d-models/soldado-personaje-f7112de9a6e24aac99f21e1b9698006d
+* author:	BernalesAriesJosue (https://sketchfab.com/BernalesAriesJosue)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "SOLDADO-Personaje" (https://sketchfab.com/3d-models/soldado-personaje-f7112de9a6e24aac99f21e1b9698006d) by BernalesAriesJosue (https://sketchfab.com/BernalesAriesJosue) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

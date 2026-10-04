@@ -1,0 +1,11 @@
+Model Information:
+* title:	policia robot
+* source:	https://sketchfab.com/3d-models/policia-robot-4fb7efaef26e48f1b06428c242c1b5f1
+* author:	Damazo26 (https://sketchfab.com/Damazo26)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "policia robot" (https://sketchfab.com/3d-models/policia-robot-4fb7efaef26e48f1b06428c242c1b5f1) by Damazo26 (https://sketchfab.com/Damazo26) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

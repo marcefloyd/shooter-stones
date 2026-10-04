@@ -1,0 +1,11 @@
+Model Information:
+* title:	Cuchillo Moonstone
+* source:	https://sketchfab.com/3d-models/cuchillo-moonstone-ad7b2f67208d488c8aff5a1f53b6a613
+* author:	AmbarHdz (https://sketchfab.com/AmbarHdz)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Cuchillo Moonstone" (https://sketchfab.com/3d-models/cuchillo-moonstone-ad7b2f67208d488c8aff5a1f53b6a613) by AmbarHdz (https://sketchfab.com/AmbarHdz) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -1,0 +1,11 @@
+Model Information:
+* title:	Modular Coastal Cliff Wall Segment
+* source:	https://sketchfab.com/3d-models/modular-coastal-cliff-wall-segment-2692c35f76a14832993c88fa2273c153
+* author:	Galaxy Abundant (https://sketchfab.com/galaxyabundant)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Modular Coastal Cliff Wall Segment" (https://sketchfab.com/3d-models/modular-coastal-cliff-wall-segment-2692c35f76a14832993c88fa2273c153) by Galaxy Abundant (https://sketchfab.com/galaxyabundant) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -37,6 +37,7 @@ function createPlayer(id, position, yaw, isAI = false) {
     yaw,
     phaseSide: position.z < 0 ? -1 : 1,
     crouching: false,
+    aiming: false,
     grenadeCount: 0,
     health: 100,
     hasKnife: false,
@@ -368,7 +369,10 @@ function collectAiPickup(bot, map, pickup, type) {
   }
   map.delete(pickup.id);
   if (type === "grenade") {
-    bot.grenadeCount += 1;
+    bot.weaponType = "bazooka";
+    bot.weaponAmmo = 1;
+    bot.knifeEquipped = false;
+    io.emit("weapon:picked", { id: pickup.id, playerId: bot.id, type: "bazooka", ammo: 1 });
     io.emit("grenade:picked", { id: pickup.id, playerId: bot.id });
     return;
   }
@@ -383,7 +387,7 @@ function collectAiPickup(bot, map, pickup, type) {
     return;
   }
   bot.weaponType = type;
-  bot.weaponAmmo = pickup.ammo || (type === "rifle" ? 30 : 12);
+  bot.weaponAmmo = pickup.ammo || (type === "rifle" ? 30 : type === "pistol" ? 12 : 1);
   bot.knifeEquipped = false;
   io.emit("weapon:picked", {
     id: pickup.id,
@@ -394,7 +398,7 @@ function collectAiPickup(bot, map, pickup, type) {
 }
 
 function aiFireAtTarget(bot, target, now) {
-  const fireDelay = bot.weaponType === "pistol" ? 650 : 500;
+  const fireDelay = bot.weaponType === "bazooka" ? 700 : bot.weaponType === "pistol" ? 650 : 500;
   if (now - bot.lastShotAt < fireDelay || bot.weaponAmmo < 1) {
     return;
   }
@@ -430,7 +434,7 @@ function aiFireAtTarget(bot, target, now) {
     direction
   });
   if (magnitude < 42) {
-    damagePlayer(target, firedType === "pistol" ? 16 : 12, firedType, bot.id);
+    damagePlayer(target, firedType === "bazooka" ? 100 : firedType === "pistol" ? 16 : 12, firedType, bot.id);
   }
 }
 
@@ -448,23 +452,15 @@ function updateAiOpponent(now, delta, roundState) {
   bot.nextAiActionAt = now + 100;
 
   if (roundState.phase === 1) {
-    const grenade = nearestPickup(grenades, bot, roundState.safeRadius);
-    if (grenade && bot.grenadeCount === 0) {
-      if (moveAiToward(bot, grenade.position, delta) < 3) {
-        collectAiPickup(bot, grenades, grenade, "grenade");
+    if (bot.weaponAmmo === 0) {
+      const bazooka = nearestPickup(grenades, bot, roundState.safeRadius);
+      if (bazooka && moveAiToward(bot, bazooka.position, delta) < 3) {
+        collectAiPickup(bot, grenades, bazooka, "grenade");
       }
-    } else if (bot.grenadeCount > 0) {
-      const dx = target.position.x - bot.position.x;
-      const dz = target.position.z - bot.position.z;
-      const distance = Math.hypot(dx, dz);
-      if (distance < 22) {
-        throwGrenade(bot, {
-          x: dx / Math.max(1, distance),
-          y: 0.18,
-          z: dz / Math.max(1, distance)
-        });
-      } else {
-        moveAiToward(bot, target.position, delta);
+    } else {
+      const distance = moveAiToward(bot, target.position, delta);
+      if (distance < 38) {
+        aiFireAtTarget(bot, target, now);
       }
     }
   } else if (roundState.phase === 2 || roundState.phase === 3) {
@@ -625,10 +621,17 @@ function enterRoundPhase(phase) {
       io.to(player.id).emit("grenade:inventory", { count: 0 });
     }
     const validType =
+      (phase === 1 && player.weaponType === "bazooka") ||
       (phase === 2 && player.weaponType === "rifle") ||
       (phase === 3 && player.weaponType === "pistol");
     if (player.weaponType && !validType) {
-      dropPlayerWeapon(player, true);
+      if (player.weaponType === "bazooka") {
+        player.weaponType = null;
+        player.weaponAmmo = 0;
+        player.knifeEquipped = player.hasKnife;
+      } else {
+        dropPlayerWeapon(player, true);
+      }
       io.to(player.id).emit("weapon:inventory", { type: null, ammo: 0 });
     }
   }
@@ -688,14 +691,16 @@ io.on("connection", (socket) => {
   socket.broadcast.emit("player:joined", player);
 
   socket.on("player:move", (state) => {
-    const { position, yaw, crouching } = state || {};
+    const { position, yaw, crouching, aiming = false, rolling = false } = state || {};
     if (
       !position ||
       !Number.isFinite(position.x) ||
       !Number.isFinite(position.y) ||
       !Number.isFinite(position.z) ||
       !Number.isFinite(yaw) ||
-      typeof crouching !== "boolean"
+      typeof crouching !== "boolean" ||
+      typeof aiming !== "boolean" ||
+      typeof rolling !== "boolean"
     ) {
       return;
     }
@@ -715,6 +720,8 @@ io.on("connection", (socket) => {
     currentPlayer.position = acceptedPosition;
     currentPlayer.yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     currentPlayer.crouching = crouching;
+    currentPlayer.aiming = aiming;
+    currentPlayer.rolling = rolling;
 
     if (
       Math.abs(acceptedPosition.x - position.x) > 0.001 ||
@@ -728,7 +735,9 @@ io.on("connection", (socket) => {
       id: socket.id,
       position: currentPlayer.position,
       yaw: currentPlayer.yaw,
-      crouching: currentPlayer.crouching
+      crouching: currentPlayer.crouching,
+      aiming: currentPlayer.aiming,
+      rolling: currentPlayer.rolling
     });
   });
 
@@ -740,11 +749,11 @@ io.on("connection", (socket) => {
       !currentPlayer ||
       currentPlayer.health <= 0 ||
       roundEndedAt !== null ||
-      !["rifle", "pistol"].includes(currentPlayer.weaponType) ||
+      !["rifle", "pistol", "bazooka"].includes(currentPlayer.weaponType) ||
       currentPlayer.weaponAmmo < 1 ||
       currentPlayer.knifeEquipped ||
       now - currentPlayer.lastShotAt <
-        (currentPlayer.weaponType === "pistol" ? 300 : 110) ||
+        (currentPlayer.weaponType === "pistol" ? 300 : currentPlayer.weaponType === "bazooka" ? 700 : 110) ||
       !direction ||
       !Number.isFinite(direction.x) ||
       !Number.isFinite(direction.y) ||
@@ -805,10 +814,11 @@ io.on("connection", (socket) => {
         offset.z * aimDirection.z;
       const distanceSquared =
         offset.x ** 2 + offset.y ** 2 + offset.z ** 2 - projection ** 2;
-      if (projection > 0 && projection < 65 && distanceSquared < 0.85 ** 2) {
+      const hitRadius = firedType === "bazooka" ? 1.8 : 0.85;
+      if (projection > 0 && projection < 65 && distanceSquared < hitRadius ** 2) {
         damagePlayer(
           target,
-          firedType === "pistol" ? 28 : 16,
+          firedType === "bazooka" ? 100 : firedType === "pistol" ? 28 : 16,
           firedType,
           currentPlayer.id
         );
@@ -926,7 +936,7 @@ io.on("connection", (socket) => {
       !currentPlayer ||
       !grenade ||
       currentPlayer.health <= 0 ||
-      currentPlayer.grenadeCount >= 1 ||
+      currentPlayer.weaponAmmo > 0 ||
       getRoundState().phase !== 1 ||
       roundEndedAt !== null ||
       !isInSafeZone(currentPlayer) ||
@@ -944,8 +954,16 @@ io.on("connection", (socket) => {
     }
 
     grenades.delete(grenadeId);
-    currentPlayer.grenadeCount += 1;
-    socket.emit("grenade:inventory", { count: currentPlayer.grenadeCount });
+    currentPlayer.weaponType = "bazooka";
+    currentPlayer.weaponAmmo = 1;
+    currentPlayer.knifeEquipped = false;
+    socket.emit("weapon:inventory", { type: "bazooka", ammo: 1 });
+    io.emit("weapon:picked", {
+      id: grenadeId,
+      playerId: currentPlayer.id,
+      type: "bazooka",
+      ammo: 1
+    });
     io.emit("grenade:picked", { id: grenadeId, playerId: socket.id });
   });
 

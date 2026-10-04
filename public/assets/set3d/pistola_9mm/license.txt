@@ -1,0 +1,11 @@
+Model Information:
+* title:	pistola 9mm
+* source:	https://sketchfab.com/3d-models/pistola-9mm-ce79e3dbdb4542aaaaef0afff7bb0914
+* author:	Eduardo.Salas (https://sketchfab.com/Eduardo.Salas)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "pistola 9mm" (https://sketchfab.com/3d-models/pistola-9mm-ce79e3dbdb4542aaaaef0afff7bb0914) by Eduardo.Salas (https://sketchfab.com/Eduardo.Salas) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

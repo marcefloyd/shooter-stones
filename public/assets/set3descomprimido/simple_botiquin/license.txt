@@ -1,0 +1,11 @@
+Model Information:
+* title:	Simple Botiquin
+* source:	https://sketchfab.com/3d-models/simple-botiquin-634157ea11854c99817da388d568aa30
+* author:	TonyG159 (https://sketchfab.com/TonyG159)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Simple Botiquin" (https://sketchfab.com/3d-models/simple-botiquin-634157ea11854c99817da388d568aa30) by TonyG159 (https://sketchfab.com/TonyG159) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

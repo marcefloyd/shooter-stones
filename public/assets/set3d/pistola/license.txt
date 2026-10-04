@@ -1,0 +1,11 @@
+Model Information:
+* title:	Pistola
+* source:	https://sketchfab.com/3d-models/pistola-ec7f4bd2203e44168384dde604f89c91
+* author:	LeoDM (https://sketchfab.com/LeoDM)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Pistola" (https://sketchfab.com/3d-models/pistola-ec7f4bd2203e44168384dde604f89c91) by LeoDM (https://sketchfab.com/LeoDM) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

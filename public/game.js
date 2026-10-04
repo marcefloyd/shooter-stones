@@ -1,4 +1,6 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { clone as cloneSkinnedModel } from "three/addons/utils/SkeletonUtils.js";
 
 const canvas = document.querySelector("#game-canvas");
 const statusElement = document.querySelector("#connection-status");
@@ -568,7 +570,7 @@ function createPickupLabelTexture(type) {
     return pickupLabelTextures.get(type);
   }
   const labels = {
-    grenade: "GRANADA",
+    grenade: "BAZOOKA",
     rifle: "RIFLE",
     pistol: "PISTOLA",
     knife: "CUCHILLO"
@@ -663,27 +665,96 @@ function addPropPart(group, geometry, material, position, rotation) {
   group.add(mesh);
 }
 
+const propGltfLoader = new GLTFLoader();
+const propGltfTemplates = new Map();
+const propGltfUrls = {
+  ak47: "/assets/set3descomprimido/ak47/scene.gltf",
+  grenade: "/assets/set3descomprimido/granada/scene.gltf",
+  bazooka: "/assets/set3descomprimido/bazooka/scene.gltf"
+};
+
+function addGltfProp(group, fallback, type) {
+  fallback.visible = false;
+  if (!propGltfTemplates.has(type)) {
+    const url = propGltfUrls[type];
+    const request = new Promise((resolve, reject) => {
+      propGltfLoader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+    });
+    propGltfTemplates.set(type, request);
+  }
+
+  propGltfTemplates.get(type).then((template) => {
+    if (!group.parent && !scene.children.includes(group)) {
+      return;
+    }
+    const model = template.clone(true);
+    model.traverse((node) => {
+      if (node.isMesh) {
+        node.geometry = node.geometry.clone();
+        node.material = Array.isArray(node.material)
+          ? node.material.map((material) => material.clone())
+          : node.material.clone();
+      }
+    });
+
+    if (type === "grenade") {
+      model.rotation.x = -Math.PI / 2;
+    }
+
+    let bounds = new THREE.Box3().setFromObject(model);
+    let size = bounds.getSize(new THREE.Vector3());
+    if (type === "ak47" && size.x > size.z) {
+      model.rotation.y = Math.PI / 2;
+      bounds = new THREE.Box3().setFromObject(model);
+      size = bounds.getSize(new THREE.Vector3());
+    }
+
+    const targetSize = type === "ak47" || type === "bazooka" ? 2.2 : 0.76;
+    const measuredSize = type === "ak47" || type === "bazooka" ? Math.max(size.x, size.z) : size.y;
+    const scale = targetSize / (measuredSize || 1);
+    model.scale.setScalar(scale);
+    bounds = new THREE.Box3().setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    model.position.set(-center.x, -bounds.min.y, -center.z);
+    model.traverse((node) => {
+      if (node.isMesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+
+    fallback.visible = false;
+    group.add(model);
+  }).catch((error) => {
+    fallback.visible = true;
+    console.error(`No se pudo cargar el modelo ${type} (${propGltfUrls[type]}):`, error);
+  });
+}
+
 function createGrenade() {
   const grenade = new THREE.Group();
+  const fallback = new THREE.Group();
+  grenade.add(fallback);
   addPropPart(
-    grenade,
+    fallback,
     new THREE.IcosahedronGeometry(0.38, 1),
     propMaterials.grenade,
     [0, 0.38, 0]
   );
   addPropPart(
-    grenade,
+    fallback,
     new THREE.CylinderGeometry(0.14, 0.18, 0.2, 6),
     propMaterials.grenadeDark,
     [0, 0.7, 0]
   );
   addPropPart(
-    grenade,
+    fallback,
     new THREE.TorusGeometry(0.2, 0.035, 4, 8),
     propMaterials.rifleAccent,
     [0.18, 0.72, 0],
     [Math.PI / 2, 0, 0]
   );
+  addGltfProp(grenade, fallback, "grenade");
   return grenade;
 }
 
@@ -714,37 +785,40 @@ function createGroundKnife(position) {
 
 function createRifle() {
   const rifle = new THREE.Group();
+  const fallback = new THREE.Group();
+  rifle.add(fallback);
   addPropPart(
-    rifle,
+    fallback,
     new THREE.BoxGeometry(0.34, 0.2, 1.45),
     propMaterials.rifle,
     [0, 0.2, 0]
   );
   addPropPart(
-    rifle,
+    fallback,
     new THREE.CylinderGeometry(0.055, 0.055, 0.95, 6),
     propMaterials.rifle,
     [0, 0.22, -1.05],
     [Math.PI / 2, 0, 0]
   );
   addPropPart(
-    rifle,
+    fallback,
     new THREE.BoxGeometry(0.19, 0.36, 0.28),
     propMaterials.rifleAccent,
     [0, 0.08, 0.32]
   );
   addPropPart(
-    rifle,
+    fallback,
     new THREE.BoxGeometry(0.16, 0.35, 0.25),
     propMaterials.rifle,
     [0, -0.04, -0.05]
   );
   addPropPart(
-    rifle,
+    fallback,
     new THREE.BoxGeometry(0.16, 0.12, 0.28),
     propMaterials.rifleAccent,
     [0, 0.34, -0.14]
   );
+  addGltfProp(rifle, fallback, "ak47");
   return rifle;
 }
 
@@ -804,12 +878,21 @@ function createKnife() {
 }
 
 function createGroundGrenade(position) {
-  const grenade = createGrenade();
-  grenade.position.set(position.x, 0, position.z);
-  grenade.rotation.y = arenaRng() * Math.PI * 2;
-  grenade.userData.pickupId = null;
-  addPickupBeacon(grenade, "grenade");
-  return grenade;
+  const bazooka = createBazooka();
+  bazooka.position.set(position.x, 0.05, position.z);
+  bazooka.rotation.y = arenaRng() * Math.PI * 2;
+  bazooka.userData.pickupId = null;
+  addPickupBeacon(bazooka, "grenade");
+  return bazooka;
+}
+
+function createBazooka() {
+  const bazooka = new THREE.Group();
+  const fallback = new THREE.Group();
+  bazooka.add(fallback);
+  addPropPart(fallback, new THREE.CylinderGeometry(0.15, 0.15, 1.7, 8), propMaterials.rifle, [0, 0.25, 0], [Math.PI / 2, 0, 0]);
+  addGltfProp(bazooka, fallback, "bazooka");
+  return bazooka;
 }
 
 function addArenaEquipment() {
@@ -860,6 +943,18 @@ const projectileMaterial = new THREE.MeshBasicMaterial({
   opacity: 0.95,
   blending: THREE.AdditiveBlending,
   depthWrite: false
+});
+const bazookaProjectileBodyGeometry = new THREE.CylinderGeometry(0.11, 0.11, 0.92, 8);
+bazookaProjectileBodyGeometry.rotateX(Math.PI / 2);
+const bazookaProjectileTipGeometry = new THREE.ConeGeometry(0.17, 0.34, 8);
+bazookaProjectileTipGeometry.rotateX(Math.PI / 2);
+// Keep the projectile materials unlit: they are small and short lived, and
+// compiling additional lit materials during the first shot can stall rendering.
+const bazookaProjectileBodyMaterial = new THREE.MeshBasicMaterial({
+  color: 0x536d45
+});
+const bazookaProjectileTipMaterial = new THREE.MeshBasicMaterial({
+  color: 0x8df542
 });
 const sparkGeometry = new THREE.SphereGeometry(0.05, 5, 4);
 const smokeGeometry = new THREE.SphereGeometry(0.22, 7, 6);
@@ -944,6 +1039,8 @@ let isFiring = false;
 let cameraYaw = 0;
 let cameraPitch = -0.12;
 let verticalVelocity = 0;
+const rollDuration = 620;
+const rollDistance = 4.2;
 let lastShotAt = -Infinity;
 let grenadeCount = 0;
 let weaponType = null;
@@ -1455,6 +1552,25 @@ function forwardFromYaw(yaw) {
   return new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
 }
 
+const playerSoldierLoader = new GLTFLoader();
+const playerSoldierUrls = {
+  wolf: "/assets/modelos/adventurer/adventurer.glb.glb",
+  sheep: "/assets/modelos/Punk by Quaternius - BTALZymknF.glb"
+};
+const playerSoldierTemplates = new Map();
+
+function loadPlayerSoldier(variant) {
+  if (!playerSoldierTemplates.has(variant)) {
+    const request = new Promise((resolve, reject) => {
+      playerSoldierLoader.load(playerSoldierUrls[variant], (gltf) => {
+        resolve(gltf);
+      }, undefined, reject);
+    });
+    playerSoldierTemplates.set(variant, request);
+  }
+  return playerSoldierTemplates.get(variant);
+}
+
 function createPlayer(id, state) {
   const root = new THREE.Group();
   root.position.set(state.position.x, state.position.y || 0, state.position.z);
@@ -1463,242 +1579,72 @@ function createPlayer(id, state) {
   root.userData.weaponType = state.weaponType || null;
   root.userData.weaponAmmo = state.weaponAmmo || 0;
   root.userData.health = state.health ?? 100;
-  const isWolf = id === localPlayerId;
-  const isSheep = !isWolf;
-  root.userData.species = isWolf ? "wolf" : "sheep";
-  const fur = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x718896 : 0xe8e3d8,
-    roughness: 0.78,
-    metalness: 0.04,
-    flatShading: true
-  });
-  const darkFur = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x2f3d45 : 0x2c3136,
-    roughness: 0.72,
-    metalness: 0.05
-  });
-  const face = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x8ea0a8 : 0x3a3c42,
-    roughness: 0.7
-  });
-  const muzzle = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0xd0c9b9 : 0xe6ded0,
-    roughness: 0.86
-  });
-  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xf4eee0, roughness: 0.7 });
-  const eyeDark = new THREE.MeshStandardMaterial({ color: 0x171b20, roughness: 0.5 });
-  const nose = new THREE.MeshStandardMaterial({ color: 0x202328, roughness: 0.68 });
-  const denim = new THREE.MeshStandardMaterial({ color: 0x263e69, roughness: 0.82, flatShading: true });
-  const denimLight = new THREE.MeshStandardMaterial({ color: 0x41618b, roughness: 0.78 });
-  const camo = new THREE.MeshStandardMaterial({ color: 0x536344, roughness: 0.92, flatShading: true });
-  const tactical = new THREE.MeshStandardMaterial({ color: 0x343b35, roughness: 0.76, flatShading: true });
-  const clothAccent = new THREE.MeshStandardMaterial({ color: isWolf ? 0x9c754d : 0x8e7652, roughness: 0.8 });
-
-  const addPart = (geometry, material, position, scale) => {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(position[0], position[1], position[2]);
-    if (scale) {
-      mesh.scale.set(scale[0], scale[1], scale[2]);
-    }
-    root.add(mesh);
-    return mesh;
-  };
-  const sphere = new THREE.SphereGeometry(1, 10, 8);
-
-  const torso = new THREE.Group();
-  torso.position.set(0, 1.12, 0);
-  root.add(torso);
-  const torsoMesh = new THREE.Mesh(sphere, fur);
-  torsoMesh.position.y = 0.12;
-  torsoMesh.scale.set(isWolf ? 0.36 : 0.53, isWolf ? 0.54 : 0.62, isWolf ? 0.3 : 0.36);
-  torso.add(torsoMesh);
-  if (isSheep) {
-    // Broad shoulders and a fitted tactical vest emphasize the sheep's powerful build.
-    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.25, 0.42), fur);
-    shoulders.position.set(0, 0.48, 0);
-    torso.add(shoulders);
-    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.58, 0.38), tactical);
-    vest.position.set(0, 0.16, -0.012);
-    torso.add(vest);
-    for (const side of [-1, 1]) {
-      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.19, 0.12), camo);
-      pouch.position.set(side * 0.24, 0.05, -0.225);
-      torso.add(pouch);
-      const woolShoulder = new THREE.Mesh(sphere, fur);
-      woolShoulder.position.set(side * 0.48, 0.38, -0.015);
-      woolShoulder.scale.set(0.19, 0.21, 0.21);
-      torso.add(woolShoulder);
-      const camoPatch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.11, 0.025), clothAccent);
-      camoPatch.position.set(side * 0.08, 0.12, -0.22);
-      camoPatch.rotation.z = side * 0.28;
-      vest.add(camoPatch);
-    }
-  } else {
-    // A narrow chest and loose, low-slung denim silhouette keep the wolf agile.
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.13, 0.34), clothAccent);
-    belt.position.set(0, -0.47, 0);
-    torso.add(belt);
-  }
-
-  const head = new THREE.Group();
-  head.position.set(0, 0.76, -0.02);
-  torso.add(head);
-  const addHeadPart = (geometry, material, position, scale, rotation) => {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(position[0], position[1], position[2]);
-    if (scale) {
-      mesh.scale.set(scale[0], scale[1], scale[2]);
-    }
-    if (rotation) {
-      mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
-    }
-    head.add(mesh);
-    return mesh;
-  };
-
-  if (isWolf) {
-    addHeadPart(sphere, face, [0, 0, 0], [0.32, 0.31, 0.3]);
-    addHeadPart(sphere, muzzle, [0, -0.12, -0.26], [0.205, 0.15, 0.31]);
-    addHeadPart(sphere, darkFur, [0, -0.215, -0.205], [0.19, 0.065, 0.2]);
-    addHeadPart(new THREE.SphereGeometry(0.075, 8, 6), nose, [0, -0.08, -0.56]);
-    for (const side of [-1, 1]) {
-      addHeadPart(
-        new THREE.ConeGeometry(0.15, 0.48, 5),
-        darkFur,
-        [side * 0.21, 0.34, 0.015],
-        [1, 1, 0.8],
-        [0, 0, side * -0.12]
-      );
-      addHeadPart(sphere, eyeWhite, [side * 0.16, 0.04, -0.245], [0.075, 0.08, 0.045]);
-      addHeadPart(sphere, eyeDark, [side * 0.16, 0.035, -0.284], [0.035, 0.045, 0.022]);
-    }
-    const tail = addPart(new THREE.ConeGeometry(0.13, 0.5, 7), darkFur, [0, 1.08, 0.39]);
-    tail.rotation.x = Math.PI / 2.25;
-  } else {
-    addHeadPart(sphere, face, [0, -0.015, -0.035], [0.26, 0.3, 0.25]);
-    addHeadPart(sphere, muzzle, [0, -0.12, -0.23], [0.16, 0.12, 0.1]);
-    addHeadPart(sphere, nose, [0, -0.08, -0.315], [0.055, 0.045, 0.035]);
-    for (const side of [-1, 1]) {
-      addHeadPart(
-        new THREE.ConeGeometry(0.075, 0.24, 6),
-        darkFur,
-        [side * 0.28, 0.03, -0.015],
-        [1, 0.65, 1],
-        [0, 0, side * 0.9]
-      );
-      addHeadPart(sphere, eyeWhite, [side * 0.13, 0.055, -0.235], [0.055, 0.06, 0.035]);
-      addHeadPart(sphere, eyeDark, [side * 0.13, 0.05, -0.267], [0.027, 0.035, 0.02]);
-      addHeadPart(sphere, fur, [side * 0.2, 0.2, 0.005], [0.14, 0.14, 0.14]);
-    }
-    for (const [x, y, z] of [
-      [-0.25, 1.2, 0],
-      [0.25, 1.2, 0],
-      [-0.28, 1.02, 0.13],
-      [0.28, 1.02, 0.13],
-      [0, 1.37, 0.04],
-      [-0.19, 1.63, 0.02],
-      [0.19, 1.63, 0.02]
-    ]) {
-      addPart(sphere, fur, [x, y, z], [0.19, 0.19, 0.19]);
-    }
-    addPart(sphere, fur, [0, 1.0, 0.39], [0.16, 0.18, 0.17]);
-  }
-
-  const legs = [];
-  const lowerLegs = [];
-  for (const x of [-0.2, 0.2]) {
-    const leg = new THREE.Group();
-    leg.position.set(x * (isWolf ? 1 : 1.38), 0.62, 0);
-    root.add(leg);
-    const pantsMaterial = isWolf ? denim : camo;
-    const thigh = new THREE.Mesh(
-      new THREE.CylinderGeometry(isWolf ? 0.22 : 0.25, isWolf ? 0.24 : 0.27, 0.56, 7),
-      pantsMaterial
-    );
-    thigh.position.y = -0.23;
-    leg.add(thigh);
-    if (isWolf) {
-      const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.27, 0.18), denimLight);
-      pocket.position.set(x < 0 ? -0.19 : 0.19, -0.24, -0.015);
-      leg.add(pocket);
-    }
-    if (isWolf) {
-      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.22, 0.12, 7), denimLight);
-      cuff.position.y = -0.45;
-      leg.add(cuff);
-    } else {
-      const kneePad = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.12), tactical);
-      kneePad.position.set(0, -0.38, -0.15);
-      leg.add(kneePad);
-    }
-    const shin = new THREE.Group();
-    shin.position.set(0, -0.47, 0);
-    leg.add(shin);
-    const shinMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.34, 7), isWolf ? denim : camo);
-    shinMesh.position.y = -0.17;
-    shin.add(shinMesh);
-    const foot = new THREE.Mesh(sphere, isSheep ? nose : darkFur);
-    foot.position.set(0, -0.35, -0.1);
-    foot.scale.set(0.16, 0.1, 0.23);
-    shin.add(foot);
-    legs.push(leg);
-    lowerLegs.push(shin);
-  }
-  root.userData.legs = legs;
-  root.userData.lowerLegs = lowerLegs;
-  root.userData.torso = torso;
-  root.userData.gaitPhase = Math.random() * Math.PI * 2;
-  root.userData.lastAnimationPosition = root.position.clone();
-
-  const arms = [];
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Group();
-    arm.position.set(side * (isWolf ? 0.32 : 0.48), 0.5, 0);
-    torso.add(arm);
-    const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(isWolf ? 0.105 : 0.16, isWolf ? 0.13 : 0.19, 0.43, 7), fur);
-    upperArm.position.y = -0.2;
-    arm.add(upperArm);
-    if (isSheep) {
-      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.16, 0.18, 7), tactical);
-      sleeve.position.y = -0.07;
-      arm.add(sleeve);
-    }
-    const elbow = new THREE.Group();
-    elbow.position.y = -0.4;
-    arm.add(elbow);
-    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.11, 0.34, 7), isSheep ? fur : darkFur);
-    forearm.position.y = -0.16;
-    elbow.add(forearm);
-    const paw = new THREE.Mesh(sphere, isSheep ? nose : darkFur);
-    paw.position.set(0, -0.35, -0.035);
-    paw.scale.set(0.13, 0.11, 0.14);
-    elbow.add(paw);
-    arms.push({ shoulder: arm, elbow });
-  }
-  root.userData.arms = arms;
+  root.userData.aiming = Boolean(state.aiming);
+  root.userData.crouching = Boolean(state.crouching);
   root.userData.pickupAnimation = 0;
+  root.userData.throwAnimation = 0;
+  root.userData.jumpAnimation = 0;
+  // El jugador local controla la oveja táctica; el rival se muestra como lobo.
+  const isWolf = id !== localPlayerId;
+  root.userData.species = isWolf ? "wolf" : "sheep";
+
+  const characterPivot = new THREE.Group();
+  characterPivot.position.y = 0.82;
+  root.add(characterPivot);
+  const characterVisual = new THREE.Group();
+  characterVisual.position.y = -0.82;
+  characterPivot.add(characterVisual);
+  root.userData.characterPivot = characterPivot;
+  root.userData.characterVisual = characterVisual;
+  root.userData.rollStartedAt = 0;
+  root.userData.rollDirection = new THREE.Vector3();
+
+  // Figura visible mientras llega el GLB (o si el navegador no puede cargarlo).
+  const characterFallback = new THREE.Group();
+  const fallbackMaterial = new THREE.MeshStandardMaterial({
+    color: isWolf ? 0x526f91 : 0xd9d0b8,
+    roughness: 0.82
+  });
+  const fallbackBody = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.34, 0.9, 4, 8),
+    fallbackMaterial
+  );
+  fallbackBody.position.y = 0.82;
+  fallbackBody.castShadow = true;
+  characterFallback.add(fallbackBody);
+  const fallbackHead = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 12, 10),
+    fallbackMaterial
+  );
+  fallbackHead.position.y = 1.55;
+  fallbackHead.castShadow = true;
+  characterFallback.add(fallbackHead);
+  characterVisual.add(characterFallback);
 
   const heldRifle = createRifle();
-  heldRifle.position.set(0.38, 1.12, -0.48);
-  heldRifle.scale.setScalar(0.55);
+  heldRifle.position.set(0.2, 1.0, -0.3);
   heldRifle.visible = state.weaponType === "rifle" && state.weaponAmmo > 0;
-  root.add(heldRifle);
+  characterVisual.add(heldRifle);
   root.userData.heldRifle = heldRifle;
 
   const heldPistol = createPistol();
-  heldPistol.position.set(0.38, 1.15, -0.32);
-  heldPistol.scale.setScalar(0.65);
+  heldPistol.position.set(0.2, 1.0, -0.2);
   heldPistol.visible = state.weaponType === "pistol" && state.weaponAmmo > 0;
-  root.add(heldPistol);
+  characterVisual.add(heldPistol);
   root.userData.heldPistol = heldPistol;
 
+  const heldBazooka = createBazooka();
+  heldBazooka.position.set(0.25, 1.0, -0.4);
+  heldBazooka.visible = state.weaponType === "bazooka" && state.weaponAmmo > 0;
+  characterVisual.add(heldBazooka);
+  root.userData.heldBazooka = heldBazooka;
+
   const heldKnife = createKnife();
-  heldKnife.position.set(-0.38, 1.05, -0.28);
-  heldKnife.scale.setScalar(0.55);
+  heldKnife.position.set(-0.2, 0.9, -0.2);
   heldKnife.visible = Boolean(
     state.hasKnife && (state.knifeEquipped || !state.weaponAmmo)
   );
-  root.add(heldKnife);
+  characterVisual.add(heldKnife);
   root.userData.heldKnife = heldKnife;
   root.userData.hasKnife = Boolean(state.hasKnife);
   root.userData.knifeEquipped = Boolean(
@@ -1706,26 +1652,111 @@ function createPlayer(id, state) {
   );
 
   const heldGrenade = createGrenade();
-  heldGrenade.position.set(-0.4, 0.95, -0.2);
-  heldGrenade.scale.setScalar(0.42);
+  heldGrenade.position.set(-0.2, 0.9, -0.1);
   heldGrenade.visible = Boolean(state.grenadeCount);
-  root.add(heldGrenade);
+  characterVisual.add(heldGrenade);
   root.userData.heldGrenade = heldGrenade;
 
-  root.traverse((child) => {
-    if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
-    }
-  });
   scene.add(root);
   players.set(id, root);
+  
+  loadPlayerSoldier(root.userData.species)
+    .then((template) => {
+      if (players.get(id) !== root) {
+        return;
+      }
+      const model = cloneSkinnedModel(template.scene);
+      // El GLB mira al +Z y el juego avanza hacia -Z.
+      model.rotation.y = Math.PI;
+      model.traverse((node) => {
+        if (node.isMesh) {
+          node.geometry = node.geometry.clone();
+          node.material = Array.isArray(node.material)
+            ? node.material.map((material) => material.clone())
+            : node.material.clone();
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      
+      model.updateMatrixWorld(true);
+      model.traverse((node) => {
+        if (node.isSkinnedMesh) {
+          node.skeleton.update();
+          node.computeBoundingBox();
+        }
+      });
+      const bounds = new THREE.Box3().setFromObject(model);
+      const size = bounds.getSize(new THREE.Vector3());
+      const maxSize = Math.max(size.x, size.y, size.z);
+      if (bounds.isEmpty() || !Number.isFinite(maxSize) || maxSize <= 0 || !Number.isFinite(bounds.min.y)) {
+        throw new Error("El modelo no devolvió límites 3D válidos.");
+      }
+
+      model.scale.setScalar(2.0 / maxSize);
+      model.updateMatrixWorld(true);
+      model.traverse((node) => {
+        if (node.isSkinnedMesh) {
+          node.skeleton.update();
+          node.computeBoundingBox();
+        }
+      });
+      
+      // Recalculamos los límites después de escalar para centrarlo y apoyar los pies en el suelo
+      const scaledBounds = new THREE.Box3().setFromObject(model);
+      if (scaledBounds.isEmpty() || !Number.isFinite(scaledBounds.min.y)) {
+        throw new Error("No se pudieron calcular los límites del modelo escalado.");
+      }
+      const center = scaledBounds.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -scaledBounds.min.y, -center.z);
+      // Reemplazamos los elementos viejos y posicionamos el modelo 3D correctamente
+      characterVisual.clear();
+      characterVisual.add(model);
+      root.userData.soldierModel = model;
+      root.userData.soldierJumpBones = [];
+      model.traverse((node) => {
+        if (node.isBone && (node.name === "UpperArm.L" || node.name === "UpperArm.R")) {
+          root.userData.soldierJumpBones.push({
+            bone: node,
+            direction: node.name.endsWith(".L") ? -1 : 1
+          });
+        }
+      });
+      root.userData.soldierAirPose = 0;
+      // Las armas quedan en el espacio normalizado del jugador, fuera de la escala del GLB.
+      characterVisual.add(heldRifle);
+      characterVisual.add(heldPistol);
+      characterVisual.add(heldKnife);
+      characterVisual.add(heldGrenade);
+
+      if (template.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(model);
+        const clips = new Map(template.animations.map((clip) => [clip.name.split("|").pop(), clip]));
+        const actions = new Map(
+          [...clips].map(([name, clip]) => [name, mixer.clipAction(clip)])
+        );
+        const idleAction = actions.get("Idle_Neutral") || actions.get("Idle");
+        idleAction?.play();
+        root.userData.soldierMixer = mixer;
+        root.userData.soldierActions = actions;
+        root.userData.soldierAction = idleAction;
+        root.userData.soldierActionName = idleAction === actions.get("Idle_Neutral") ? "Idle_Neutral" : "Idle";
+        root.userData.soldierForcedUntil = 0;
+        root.userData.lastAnimationPosition = root.position.clone();
+      }
+    })
+    .catch((error) => {
+      console.error("No se pudo cargar el modelo del jugador:", error);
+    });
+
   playerTargets.set(id, {
     position: root.position.clone(),
     yaw: root.rotation.y,
-    crouching: Boolean(state.crouching)
+    crouching: Boolean(state.crouching),
+    aiming: Boolean(state.aiming),
+    rolling: Boolean(state.rolling)
   });
-  root.scale.y = state.crouching ? 0.62 : 1;
+  root.scale.y = state.crouching ? 0.75 : 1;
   return root;
 }
 
@@ -1774,63 +1805,109 @@ function updatePlayerTarget(player) {
   );
   target.yaw = player.yaw || 0;
   target.crouching = Boolean(player.crouching);
+  target.aiming = Boolean(player.aiming);
+  const rolling = Boolean(player.rolling);
+  if (rolling && !target.rolling) {
+    const root = players.get(player.id);
+    if (root) root.userData.rollStartedAt = performance.now();
+  } else if (!rolling && target.rolling) {
+    const root = players.get(player.id);
+    if (root) {
+      root.userData.rollStartedAt = 0;
+      root.userData.characterPivot.rotation.x = 0;
+    }
+  }
+  target.rolling = rolling;
+}
+
+function playSoldierAnimation(player, name, oneShot = true) {
+  const userData = player?.userData;
+  const action = userData?.soldierActions?.get(name);
+  if (!action) return 0;
+
+  const now = performance.now();
+  if (oneShot && userData.soldierAction === action && userData.soldierForcedUntil > now) {
+    return action.getClip().duration;
+  }
+
+  userData.soldierAction?.fadeOut(0.1);
+  action.reset();
+  action.enabled = true;
+  action.clampWhenFinished = oneShot;
+  action.setLoop(oneShot ? THREE.LoopOnce : THREE.LoopRepeat, oneShot ? 1 : Infinity);
+  action.fadeIn(0.1).play();
+  userData.soldierAction = action;
+  userData.soldierActionName = name;
+  userData.soldierForcedUntil = oneShot ? now + action.getClip().duration * 1000 : 0;
+  return action.getClip().duration;
+}
+
+function startPlayerDeathAnimation(player) {
+  if (!player || player.userData.deathAnimationScheduled) return;
+  player.userData.deathAnimationScheduled = true;
+  const duration = playSoldierAnimation(player, "Death");
+  window.setTimeout(() => explodePlayer(player), Math.max(0, duration * 1000 - 120));
 }
 
 function updatePlayerAnimations(delta) {
   players.forEach((player) => {
-    const previous = player.userData.lastAnimationPosition;
-    const distance = Math.hypot(
-      player.position.x - previous.x,
-      player.position.z - previous.z
-    );
-    const speed = delta > 0 ? distance / delta : 0;
-    previous.copy(player.position);
-    const legs = player.userData.legs;
-    const lowerLegs = player.userData.lowerLegs;
-    const arms = player.userData.arms;
-    const sprinting = speed > 5.2;
-    if (speed > 0.12 && player.position.y < 0.1) {
-      player.userData.gaitPhase += delta * (sprinting ? 17 : 10);
-      const stride = sprinting ? 0.92 : 0.58;
-      legs[0].rotation.x = Math.sin(player.userData.gaitPhase) * stride;
-      legs[1].rotation.x = Math.sin(player.userData.gaitPhase + Math.PI) * stride;
-      lowerLegs[0].rotation.x = Math.max(0, -Math.sin(player.userData.gaitPhase)) * (sprinting ? 1.05 : 0.42);
-      lowerLegs[1].rotation.x = Math.max(0, Math.sin(player.userData.gaitPhase)) * (sprinting ? 1.05 : 0.42);
-      arms[0].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase) * (sprinting ? 0.95 : 0.52);
-      arms[1].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase + Math.PI) * (sprinting ? 0.95 : 0.52);
-      arms.forEach((arm) => { arm.elbow.rotation.x = sprinting ? -0.85 : -0.28; });
-      player.userData.torso.position.y = 1.12 + Math.abs(Math.sin(player.userData.gaitPhase * 2)) * (sprinting ? 0.09 : 0.035);
-    } else {
-      legs[0].rotation.x += (0 - legs[0].rotation.x) * Math.min(1, delta * 8);
-      legs[1].rotation.x += (0 - legs[1].rotation.x) * Math.min(1, delta * 8);
-      lowerLegs.forEach((leg) => { leg.rotation.x += (0 - leg.rotation.x) * Math.min(1, delta * 9); });
-      arms.forEach((arm) => {
-        arm.shoulder.rotation.x += (0 - arm.shoulder.rotation.x) * Math.min(1, delta * 8);
-        arm.elbow.rotation.x += (0 - arm.elbow.rotation.x) * Math.min(1, delta * 8);
-      });
-      player.userData.torso.position.y += (1.12 - player.userData.torso.position.y) * Math.min(1, delta * 10);
-    }
-    const pickup = player.userData.pickupAnimation;
-    if (pickup > 0) {
-      player.userData.pickupAnimation = Math.max(0, pickup - delta);
-      const phase = 1 - player.userData.pickupAnimation / 0.72;
-      const reach = Math.sin(Math.min(1, phase * 1.65) * Math.PI / 2);
-      const recover = phase > 0.6 ? 1 - THREE.MathUtils.smoothstep(phase, 0.6, 1) : 1;
-      player.userData.torso.rotation.x = -0.24 * reach * recover;
-      legs[0].rotation.x += 0.3 * reach * recover;
-      legs[1].rotation.x += 0.3 * reach * recover;
-      arms[1].shoulder.rotation.x = -1.05 * reach * recover;
-      arms[1].shoulder.rotation.z = -0.18;
-      arms[1].elbow.rotation.x = -0.65 * reach * recover;
-    } else {
-      const leanTarget = sprinting ? -0.2 : speed > 0.12 ? -0.055 : 0;
-      player.userData.torso.rotation.x += (leanTarget - player.userData.torso.rotation.x) * Math.min(1, delta * 8);
-      player.userData.torso.rotation.z = speed > 0.12 ? Math.sin(player.userData.gaitPhase) * 0.055 : 0;
-      arms[1].shoulder.rotation.z += (0 - arms[1].shoulder.rotation.z) * Math.min(1, delta * 8);
-    }
-    if (player.scale.y < 0.8) {
-      legs[0].rotation.x = Math.min(legs[0].rotation.x, -0.2);
-      legs[1].rotation.x = Math.min(legs[1].rotation.x, -0.2);
+    if (player.userData.soldierMixer) {
+      const previousPosition = player.userData.lastAnimationPosition;
+      const distance = previousPosition
+        ? Math.hypot(player.position.x - previousPosition.x, player.position.z - previousPosition.z)
+        : 0;
+      const speed = delta > 0 ? distance / delta : 0;
+      let nextName = "Idle_Neutral";
+      const actions = player.userData.soldierActions;
+      const moveX = previousPosition ? player.position.x - previousPosition.x : 0;
+      const moveZ = previousPosition ? player.position.z - previousPosition.z : 0;
+      const yaw = player.rotation.y;
+      const rightMovement = Math.cos(yaw) * moveX - Math.sin(yaw) * moveZ;
+      const forwardMovement = -Math.sin(yaw) * moveX - Math.cos(yaw) * moveZ;
+      if (performance.now() >= player.userData.soldierForcedUntil) {
+        if (speed >= 0.35 && Math.abs(rightMovement) > Math.abs(forwardMovement)) {
+          const sideAnimation = rightMovement < 0 ? "Run_Left" : "Run_Right";
+          nextName = actions.has(sideAnimation) ? sideAnimation : "Walk";
+        } else if (speed >= 0.35 && forwardMovement < 0 && actions.has("Run_Back")) {
+          nextName = "Run_Back";
+        } else if (speed >= 0.35 && speed >= 8.4 && actions.has("Run")) {
+          nextName = "Run";
+        } else if (speed >= 0.35 && actions.has("Walk")) {
+          nextName = "Walk";
+        } else if (player.userData.aiming && !player.userData.knifeEquipped && actions.has("Idle_Gun_Pointing")) {
+          nextName = "Idle_Gun_Pointing";
+        } else if (player.userData.crouching) {
+          nextName = actions.has("Idle_Neutral") ? "Idle_Neutral" : "Idle";
+        } else if (player.userData.knifeEquipped && actions.has("Idle_Sword")) {
+          nextName = "Idle_Sword";
+        } else if (player.userData.weaponType && actions.has("Idle_Gun")) {
+          nextName = "Idle_Gun";
+        } else if (!actions.has(nextName)) {
+          nextName = "Idle";
+        }
+        if (nextName !== player.userData.soldierActionName) {
+          playSoldierAnimation(player, nextName, false);
+        }
+      }
+      if (player.userData.playerId === localPlayerId) {
+        player.userData.crouching = keys.has("ControlLeft");
+      }
+      if (previousPosition) previousPosition.copy(player.position);
+      player.userData.soldierMixer.update(delta);
+      if (player.userData.soldierModel) {
+        const airborne = player.position.y > 0.12;
+        const blend = Math.min(1, delta * 10);
+        player.userData.soldierAirPose += ((airborne ? 1 : 0) - player.userData.soldierAirPose) * blend;
+        player.userData.soldierModel.rotation.x +=
+          ((airborne ? -0.12 : 0) - player.userData.soldierModel.rotation.x) * blend;
+        player.userData.soldierJumpBones?.forEach(({ bone, direction }) => {
+          const raiseArm = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 0, 1),
+            direction * 0.72 * player.userData.soldierAirPose
+          );
+          bone.quaternion.multiply(raiseArm);
+        });
+      }
     }
   });
 }
@@ -1858,7 +1935,7 @@ function cameraAimDirection() {
   return raycaster.ray.direction.clone().normalize();
 }
 
-function fireProjectile(id, position, yaw, crouching, aimDirection) {
+function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType) {
   const muzzleOffset = new THREE.Vector3(0.38, crouching ? 0.82 : 1.25, -0.7)
     .applyAxisAngle(worldUp, yaw);
   const origin = new THREE.Vector3(position.x, position.y, position.z).add(muzzleOffset);
@@ -1866,14 +1943,23 @@ function fireProjectile(id, position, yaw, crouching, aimDirection) {
     ? new THREE.Vector3(aimDirection.x, aimDirection.y, aimDirection.z).normalize()
     : forwardFromYaw(yaw);
 
-  const mesh = new THREE.Mesh(projectileGeometry, projectileMaterial.clone());
+  let mesh;
+  if (weaponType === "bazooka") {
+    mesh = new THREE.Group();
+    const body = new THREE.Mesh(bazookaProjectileBodyGeometry, bazookaProjectileBodyMaterial);
+    const tip = new THREE.Mesh(bazookaProjectileTipGeometry, bazookaProjectileTipMaterial);
+    tip.position.z = 0.62;
+    mesh.add(body, tip);
+  } else {
+    mesh = new THREE.Mesh(projectileGeometry, projectileMaterial.clone());
+  }
   mesh.position.copy(origin);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
   scene.add(mesh);
   projectiles.push({
     mesh,
-    velocity: direction.clone().multiplyScalar(52),
-    lifetime: 1.4
+    velocity: direction.clone().multiplyScalar(weaponType === "bazooka" ? 36 : 52),
+    lifetime: weaponType === "bazooka" ? 1.8 : 1.4
   });
   spawnMuzzleFlash(origin, direction);
   if (id === localPlayerId) {
@@ -1900,10 +1986,12 @@ function setWeaponInventory(type, ammo) {
   }
   weaponAmmoElement.textContent = String(ammo);
   weaponCapacityElement.textContent =
-    weaponType === "rifle" ? "30" : weaponType === "pistol" ? "12" : "0";
+    weaponType === "rifle" ? "30" : weaponType === "pistol" ? "12" : weaponType === "bazooka" ? "1" : "0";
   weaponStatusElement.textContent = knifeEquipped && hasKnife
     ? "CUCHILLO"
-    : weaponType
+    : weaponType === "bazooka"
+      ? "BAZOOKA"
+      : weaponType
     ? weaponType === "pistol"
       ? "PISTOLA"
       : "RIFLE AUTOMÁTICO"
@@ -1918,6 +2006,7 @@ function setWeaponInventory(type, ammo) {
       !knifeEquipped && weaponType === "rifle";
     localPlayer.userData.heldPistol.visible =
       !knifeEquipped && weaponType === "pistol";
+    localPlayer.userData.heldBazooka.visible = !knifeEquipped && weaponType === "bazooka";
     localPlayer.userData.heldKnife.visible = hasKnife && knifeEquipped;
   }
 }
@@ -2154,7 +2243,7 @@ function findNearbyPickup() {
 
   let closest = null;
   let closestDistance = Infinity;
-  if (roundPhase === 1 && grenadeCount < 1) grenadePickups.forEach((grenade, id) => {
+  if (roundPhase === 1 && weaponAmmo === 0) grenadePickups.forEach((grenade, id) => {
     if (Math.hypot(grenade.position.x, grenade.position.z) > safeRadius) {
       return;
     }
@@ -2163,7 +2252,7 @@ function findNearbyPickup() {
       localPlayer.position.z - grenade.position.z
     );
     if (distance < grenadePickupRange && distance < closestDistance) {
-      closest = { kind: "grenade", id };
+      closest = { kind: "bazooka", id };
       closestDistance = distance;
     }
   });
@@ -2233,8 +2322,9 @@ function pickUpNearbyItem() {
     return;
   }
   localPlayer.userData.pickupAnimation = 0.72;
+  playSoldierAnimation(localPlayer, "Interact");
   const events = {
-    grenade: "grenade:pickup",
+    bazooka: "grenade:pickup",
     rifle: "rifle:pickup",
     pistol: "pistol:pickup",
     knife: "knife:pickup"
@@ -2268,6 +2358,8 @@ function throwGrenade() {
   }
 
   lastGrenadeThrowAt = now;
+  localPlayer.userData.throwAnimation = 0.82;
+  playSoldierAnimation(localPlayer, "Interact");
   socket.emit("grenade:throw", { direction: cameraAimDirection() });
   return true;
 }
@@ -2447,7 +2539,9 @@ function sendPlayerState(now) {
     y: localPlayer.position.y,
     z: localPlayer.position.z,
     yaw: localPlayer.rotation.y,
-    crouching: keys.has("ControlLeft")
+    crouching: keys.has("ControlLeft"),
+    aiming: isAiming,
+    rolling: localPlayer.userData.rollStartedAt > 0
   };
   if (
     lastSentState &&
@@ -2455,7 +2549,9 @@ function sendPlayerState(now) {
     state.y === lastSentState.y &&
     state.z === lastSentState.z &&
     state.yaw === lastSentState.yaw &&
-    state.crouching === lastSentState.crouching
+    state.crouching === lastSentState.crouching &&
+    state.aiming === lastSentState.aiming &&
+    state.rolling === lastSentState.rolling
   ) {
     return;
   }
@@ -2463,7 +2559,9 @@ function sendPlayerState(now) {
   socket.emit("player:move", {
     position: { x: state.x, y: state.y, z: state.z },
     yaw: state.yaw,
-    crouching: state.crouching
+    crouching: state.crouching,
+    aiming: state.aiming,
+    rolling: state.rolling
   });
   lastSentState = state;
   lastMoveSentAt = now;
@@ -2535,8 +2633,7 @@ function connectSocket(mode = "online") {
   });
 
   socket.on("player:eliminated", ({ id }) => {
-    const player = players.get(id);
-    explodePlayer(player);
+    startPlayerDeathAnimation(players.get(id));
   });
 
   socket.on("player:shot", (shot) => {
@@ -2545,17 +2642,21 @@ function connectSocket(mode = "online") {
       shot.position,
       shot.yaw,
       shot.crouching,
-      shot.direction
+      shot.direction,
+      shot.weaponType
     );
     playShotSound(shot.weaponType, shot.position);
     const shooter = players.get(shot.id);
     if (shooter) {
+      if (!shot.knifeEquipped) playSoldierAnimation(shooter, "Gun_Shoot");
       shooter.userData.weaponType = shot.ammo > 0 ? shot.weaponType : null;
       shooter.userData.weaponAmmo = shot.ammo;
       shooter.userData.heldRifle.visible =
           !shot.knifeEquipped && shot.weaponType === "rifle" && shot.ammo > 0;
       shooter.userData.heldPistol.visible =
           !shot.knifeEquipped && shot.weaponType === "pistol" && shot.ammo > 0;
+      shooter.userData.heldBazooka.visible =
+          !shot.knifeEquipped && shot.weaponType === "bazooka" && shot.ammo > 0;
         shooter.userData.heldKnife.visible =
           Boolean(shooter.userData.hasKnife) && shot.knifeEquipped;
         shooter.userData.knifeEquipped = Boolean(shot.knifeEquipped);
@@ -2586,6 +2687,12 @@ function connectSocket(mode = "online") {
       source !== "zone" &&
       source !== "phase"
     ) {
+      if (health > 0) {
+        const actions = player?.userData.soldierActions;
+        const hitAnimation = ["HitRecieve", "HitRecieve_2", "HitReceive", "HitReceive_2"]
+          .find((name) => actions?.has(name));
+        if (hitAnimation) playSoldierAnimation(player, hitAnimation);
+      }
       playPainSound(
         player?.position,
         (player?.userData.health ?? health) - health
@@ -2601,6 +2708,7 @@ function connectSocket(mode = "online") {
       statusElement.textContent = "¡Fuera de la zona segura!";
     }
     if (health <= 0) {
+      startPlayerDeathAnimation(player);
       if (id === localPlayerId) {
         isFiring = false;
       }
@@ -2611,9 +2719,10 @@ function connectSocket(mode = "online") {
     setGrenadeCount(count);
   });
 
-  socket.on("grenade:picked", ({ id }) => {
+  socket.on("grenade:picked", ({ id, playerId }) => {
     removeGrenadePickup(id);
     playPickupSound();
+    playSoldierAnimation(players.get(playerId), "Interact");
   });
 
   socket.on("grenade:thrown", (grenade) => {
@@ -2628,10 +2737,13 @@ function connectSocket(mode = "online") {
 
   socket.on("weapon:picked", ({ id, playerId, type, ammo }) => {
     playWeaponEquipSound();
+    playSoldierAnimation(players.get(playerId), "Interact");
     if (type === "rifle") {
       removeRiflePickup(id);
     } else if (type === "pistol") {
       removePistolPickup(id);
+    } else if (type === "bazooka") {
+      removeGrenadePickup(id);
     }
     const player = players.get(playerId);
     if (player) {
@@ -2641,6 +2753,7 @@ function connectSocket(mode = "online") {
       player.userData.heldKnife.visible = false;
       player.userData.heldRifle.visible = type === "rifle";
       player.userData.heldPistol.visible = type === "pistol";
+      player.userData.heldBazooka.visible = type === "bazooka";
       if (playerId === localPlayerId) {
         knifeEquipped = false;
         setWeaponInventory(weaponType, weaponAmmo);
@@ -2670,6 +2783,7 @@ function connectSocket(mode = "online") {
 
   socket.on("knife:picked", ({ id, playerId, knifeEquipped: equipped }) => {
     playPickupSound();
+    playSoldierAnimation(players.get(playerId), "Interact");
     removeKnifePickup(id);
     const player = players.get(playerId);
     if (player) {
@@ -2710,6 +2824,7 @@ function connectSocket(mode = "online") {
     playKnifeSound();
     const player = players.get(id);
     if (player) {
+      playSoldierAnimation(player, "Sword_Slash");
       player.userData.heldKnife.rotation.x = -0.7;
       window.setTimeout(() => {
         if (players.has(id)) {
@@ -2727,6 +2842,35 @@ function connectSocket(mode = "online") {
   });
 }
 
+function startPlayerRoll() {
+  if (
+    !localPlayer ||
+    roundEnded ||
+    playerHealth <= 0 ||
+    localPlayer.position.y > 0.05 ||
+    localPlayer.userData.rollStartedAt > 0
+  ) {
+    return;
+  }
+
+  const sideInput = Number(keys.has("KeyD")) - Number(keys.has("KeyA"));
+  const forwardInput = Number(keys.has("KeyW")) - Number(keys.has("KeyS"));
+  const inputLength = Math.hypot(sideInput, forwardInput) || 1;
+  const forward = forwardFromYaw(cameraYaw);
+  localRight.set(1, 0, 0).applyAxisAngle(worldUp, cameraYaw);
+  localPlayer.userData.rollDirection
+    .set(
+      localRight.x * sideInput + forward.x * forwardInput,
+      0,
+      localRight.z * sideInput + forward.z * forwardInput
+    )
+    .normalize();
+  if (!sideInput && !forwardInput) {
+    localPlayer.userData.rollDirection.copy(forward);
+  }
+  localPlayer.userData.rollStartedAt = performance.now();
+}
+
 window.addEventListener("keydown", (event) => {
   const code = event.code;
   if (
@@ -2735,10 +2879,13 @@ window.addEventListener("keydown", (event) => {
       "KeyA",
       "KeyS",
       "KeyD",
+      "KeyF",
       "KeyE",
       "ShiftLeft",
       "ControlLeft",
-      "Space"
+      "Space",
+      "AltLeft",
+      "AltRight"
     ].includes(code)
   ) {
     event.preventDefault();
@@ -2746,6 +2893,9 @@ window.addEventListener("keydown", (event) => {
 
   if (code === "KeyE" && !event.repeat) {
     pickUpNearbyItem();
+  }
+  if (code === "KeyF" && !event.repeat) {
+    startPlayerRoll();
   }
   if (code === "KeyQ" && !event.repeat && weaponAmmo > 0) {
     socket?.emit("weapon:drop");
@@ -2851,6 +3001,7 @@ function updateCamera(delta) {
   }
 
   const crouching = keys.has("ControlLeft");
+  const frontView = keys.has("AltLeft") || keys.has("AltRight");
   const pivotHeight = crouching ? 1.05 : 1.45;
   const viewDirection = new THREE.Vector3(
     -Math.sin(cameraYaw) * Math.cos(cameraPitch),
@@ -2868,12 +3019,13 @@ function updateCamera(delta) {
   } else {
     desiredCameraPosition
       .copy(cameraLookTarget)
-      .addScaledVector(viewDirection, -6.5)
+      .addScaledVector(viewDirection, frontView ? 6.5 : -6.5)
       .addScaledVector(localRight, 0.55);
   }
-  localPlayer.visible = !isAiming;
+  localPlayer.visible = !isAiming || playerHealth <= 0;
+  localPlayer.userData.aiming = isAiming;
   camera.position.lerp(desiredCameraPosition, Math.min(1, delta * 8));
-  camera.lookAt(cameraLookTarget.addScaledVector(viewDirection, 20));
+  camera.lookAt(cameraLookTarget.addScaledVector(viewDirection, frontView ? -20 : 20));
   if (cameraShake > 0.001) {
     camera.position.x += (Math.random() - 0.5) * cameraShake;
     camera.position.y += (Math.random() - 0.5) * cameraShake * 0.7;
@@ -2996,15 +3148,16 @@ function updateMovement(delta, now) {
   const inputX = Number(keys.has("KeyD")) - Number(keys.has("KeyA"));
   const inputZ = Number(keys.has("KeyS")) - Number(keys.has("KeyW"));
   const inputLength = Math.hypot(inputX, inputZ);
+  const rolling = localPlayer.userData.rollStartedAt > 0;
   footstepCooldown -= delta;
-  if (inputLength > 0 && localPlayer.position.y <= 0.05 && footstepCooldown <= 0) {
+  if (!rolling && inputLength > 0 && localPlayer.position.y <= 0.05 && footstepCooldown <= 0) {
     playFootstepSound();
     footstepCooldown = crouching ? 0.68 : keys.has("ShiftLeft") ? 0.32 : 0.48;
     spawnDust(localPlayer.position.clone(), keys.has("ShiftLeft") ? 6 : 3);
   }
 
   localPlayer.rotation.y = cameraYaw;
-  if (inputLength > 0) {
+  if (inputLength > 0 && !rolling) {
     const forward = forwardFromYaw(cameraYaw);
     localRight.set(1, 0, 0).applyAxisAngle(worldUp, cameraYaw);
     const rightInput = inputX / inputLength;
@@ -3035,6 +3188,33 @@ function updateMovement(delta, now) {
     }
   }
 
+  if (rolling) {
+    const elapsed = now - localPlayer.userData.rollStartedAt;
+    const progress = Math.min(1, elapsed / rollDuration);
+    const stepDistance = rollDistance * (delta * 1000 / rollDuration);
+    const direction = localPlayer.userData.rollDirection;
+    const nextX = constrainPositionToPhase(
+      localPlayer.position.x + direction.x * stepDistance,
+      localPlayer.position.z
+    ).x;
+    if (canOccupyPosition(nextX, localPlayer.position.z)) {
+      localPlayer.position.x = nextX;
+    }
+    const nextZ = constrainPositionToPhase(
+      localPlayer.position.x,
+      localPlayer.position.z + direction.z * stepDistance
+    ).z;
+    if (canOccupyPosition(localPlayer.position.x, nextZ)) {
+      localPlayer.position.z = nextZ;
+    }
+    localPlayer.userData.characterPivot.rotation.x = Math.PI * 2 * progress;
+    if (progress >= 1) {
+      localPlayer.userData.rollStartedAt = 0;
+      localPlayer.userData.characterPivot.rotation.x = 0;
+      lastSentState = null;
+    }
+  }
+
   if (localPlayer.position.y > 0 || verticalVelocity > 0) {
     verticalVelocity -= gravity * delta;
     localPlayer.position.y = Math.max(
@@ -3050,7 +3230,7 @@ function updateMovement(delta, now) {
     }
   }
 
-  const targetScaleY = crouching ? 0.62 : 1;
+  const targetScaleY = crouching ? 0.75 : 1;
   localPlayer.scale.y += (targetScaleY - localPlayer.scale.y) * Math.min(1, delta * 14);
   sendPlayerState(now);
 }
@@ -3071,8 +3251,17 @@ function updateRemotePlayers(delta) {
       Math.cos(target.yaw - root.rotation.y)
     );
     root.rotation.y += yawDifference * Math.min(1, delta * 12);
-    const targetScaleY = target.crouching ? 0.62 : 1;
+    const targetScaleY = target.crouching ? 0.75 : 1;
     root.scale.y += (targetScaleY - root.scale.y) * Math.min(1, delta * 12);
+    root.userData.crouching = target.crouching;
+    root.userData.aiming = target.aiming;
+    if (target.rolling && root.userData.rollStartedAt > 0) {
+      const progress = Math.min(
+        1,
+        (performance.now() - root.userData.rollStartedAt) / rollDuration
+      );
+      root.userData.characterPivot.rotation.x = Math.PI * 2 * progress;
+    }
   });
 }
 
@@ -3099,7 +3288,9 @@ function updateProjectiles(delta) {
         spawnDust(projectile.mesh.position, 3);
       }
       scene.remove(projectile.mesh);
-      if (projectile.mesh.material !== projectileMaterial) {
+      // Bazooka projectiles are Groups with shared child materials. Only
+      // dispose the per-shot material used by ordinary Mesh projectiles.
+      if (projectile.mesh.isMesh && projectile.mesh.material !== projectileMaterial) {
         projectile.mesh.material.dispose();
       }
       projectiles.splice(i, 1);
@@ -3180,12 +3371,12 @@ function updateGrenades(delta, now) {
   grenadePickupPrompt.hidden = !nearbyPickup;
   if (nearbyPickup) {
     const promptLabels = {
-      grenade: "RECOGER GRANADA",
+    bazooka: "RECOGER BAZOOKA",
       rifle: "RECOGER RIFLE (30)",
       pistol: "RECOGER PISTOLA (12)",
       knife: "RECOGER CUCHILLO"
     };
-    grenadePickupPrompt.innerHTML = `<kbd>E</kbd> ${promptLabels[nearbyPickup.kind]}`;
+    grenadePickupPrompt.innerHTML = `E ${promptLabels[nearbyPickup.kind]}`;
   }
 
   thrownGrenades.forEach((grenade, id) => {
