@@ -7,7 +7,8 @@ const statusElement = document.querySelector("#connection-status");
 const hitFlashElement = document.querySelector("#hit-flash");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#0b1220");
-scene.fog = new THREE.FogExp2("#101826", 0.0115);
+// Mantener visibles los rivales al otro extremo de la cancha (unos 100 m).
+scene.fog = new THREE.FogExp2("#101826", 0.0035);
 
 const camera = new THREE.PerspectiveCamera(
   50,
@@ -1602,7 +1603,12 @@ function createPlayer(id, state) {
   // Figura visible mientras llega el GLB (o si el navegador no puede cargarlo).
   const characterFallback = new THREE.Group();
   const fallbackMaterial = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x526f91 : 0xd9d0b8,
+    color: isWolf ? 0x8fcaff : 0xd9d0b8,
+    emissive: isWolf ? 0x276ba0 : 0x000000,
+    emissiveIntensity: isWolf ? 0.55 : 0,
+    transparent: isWolf,
+    opacity: isWolf ? 0.42 : 1,
+    depthWrite: !isWolf,
     roughness: 0.82
   });
   const fallbackBody = new THREE.Mesh(
@@ -1670,6 +1676,9 @@ function createPlayer(id, state) {
       model.rotation.y = Math.PI;
       model.traverse((node) => {
         if (node.isMesh) {
+          // El rig del adventurer tiene bounds que pueden dejar de cubrir la
+          // malla al animarse; evita que Three.js lo oculte según el frustum.
+          node.frustumCulled = false;
           node.geometry = node.geometry.clone();
           node.material = Array.isArray(node.material)
             ? node.material.map((material) => material.clone())
@@ -1710,7 +1719,9 @@ function createPlayer(id, state) {
       const center = scaledBounds.getCenter(new THREE.Vector3());
       model.position.set(-center.x, -scaledBounds.min.y, -center.z);
       // Reemplazamos los elementos viejos y posicionamos el modelo 3D correctamente
-      characterVisual.clear();
+      // Conserva una silueta suave del lobo como respaldo visible mientras el
+      // modelo GLB se anima o si alguna parte del rig queda fuera de sus bounds.
+      if (!isWolf) characterVisual.clear();
       characterVisual.add(model);
       root.userData.soldierModel = model;
       root.userData.soldierJumpBones = [];
@@ -1958,6 +1969,7 @@ function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType) 
   scene.add(mesh);
   projectiles.push({
     mesh,
+    weaponType,
     velocity: direction.clone().multiplyScalar(weaponType === "bazooka" ? 36 : 52),
     lifetime: weaponType === "bazooka" ? 1.8 : 1.4
   });
@@ -3268,6 +3280,7 @@ function updateRemotePlayers(delta) {
 function updateProjectiles(delta) {
   for (let i = projectiles.length - 1; i >= 0; i -= 1) {
     const projectile = projectiles[i];
+    const previousPosition = projectile.mesh.position.clone();
     projectile.mesh.position.addScaledVector(projectile.velocity, delta);
     projectile.lifetime -= delta;
     projectile.mesh.quaternion.setFromUnitVectors(
@@ -3276,16 +3289,48 @@ function updateProjectiles(delta) {
     );
 
     const hitGround = projectile.mesh.position.y <= 0.04;
+    const segmentX = projectile.mesh.position.x - previousPosition.x;
+    const segmentZ = projectile.mesh.position.z - previousPosition.z;
+    const segmentLengthSquared = segmentX * segmentX + segmentZ * segmentZ;
+    const hitRock = rockObstacles.some((rock) => {
+      const along = segmentLengthSquared > 0
+        ? THREE.MathUtils.clamp(((rock.x - previousPosition.x) * segmentX + (rock.z - previousPosition.z) * segmentZ) / segmentLengthSquared, 0, 1)
+        : 0;
+      const closestX = previousPosition.x + segmentX * along;
+      const closestZ = previousPosition.z + segmentZ * along;
+      const closestY = previousPosition.y + (projectile.mesh.position.y - previousPosition.y) * along;
+      return (closestX - rock.x) ** 2 + (closestZ - rock.z) ** 2 <= (rock.radius + 0.14) ** 2 && closestY <= rock.y + rock.scaleY * 1.25;
+    });
+    const hitWall = Math.abs(projectile.mesh.position.x) >= halfWidth || Math.abs(projectile.mesh.position.z) >= halfLength;
     const outOfBounds =
       projectile.lifetime <= 0 ||
       Math.abs(projectile.mesh.position.x) > halfWidth + 2 ||
       Math.abs(projectile.mesh.position.z) > halfLength + 2 ||
-      hitGround;
+      hitGround || hitRock || hitWall;
 
     if (outOfBounds) {
-      if (hitGround) {
+      if (hitGround || hitRock || hitWall) {
         spawnImpactSparks(projectile.mesh.position, projectile.velocity.clone().normalize());
         spawnDust(projectile.mesh.position, 3);
+        if (projectile.weaponType === "bazooka") {
+          const blast = new THREE.Mesh(
+            new THREE.SphereGeometry(1, 12, 10),
+            new THREE.MeshBasicMaterial({ color: 0xff8a32, transparent: true, opacity: 0.82, depthWrite: false })
+          );
+          blast.position.copy(projectile.mesh.position);
+          blast.scale.setScalar(0.25);
+          scene.add(blast);
+          const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.2, 0.4, 20),
+            new THREE.MeshBasicMaterial({ color: 0xffd16a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })
+          );
+          ring.rotation.x = -Math.PI / 2;
+          ring.position.set(projectile.mesh.position.x, 0.06, projectile.mesh.position.z);
+          scene.add(ring);
+          grenadeExplosions.push({ mesh: blast, shockwave: ring, age: 0 });
+          spawnFxLight(projectile.mesh.position, 0xff7028, 9, 16, 0.22);
+          playExplosionSound(projectile.mesh.position);
+        }
       }
       scene.remove(projectile.mesh);
       // Bazooka projectiles are Groups with shared child materials. Only

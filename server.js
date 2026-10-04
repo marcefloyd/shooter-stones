@@ -96,6 +96,53 @@ const initialPickups = {
   knives: Array.from(knives.values())
 };
 
+// Keep the server's shot checks aligned with the deterministic client arena.
+function createShotBlockingRocks() {
+  let seed = 5831;
+  const random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  const protectedSpots = [...grenades, ...rifles, ...pistols, ...knives]
+    .map(([, pickup]) => pickup.position);
+  const rocks = [];
+  for (let i = 0; i < 72; i += 1) {
+    let x;
+    let z;
+    let attempts = 0;
+    do {
+      x = random() * 62 - 31;
+      z = random() * 99 - 49.5;
+      attempts += 1;
+    } while (attempts < 50 && (Math.hypot(x + 3, z) < 4 || Math.hypot(x - 3, z) < 4 || ((Math.floor((z + 52.5) / 17.5) === 2 || Math.floor((z + 52.5) / 17.5) === 3) && Math.hypot(x, z) < 12.5) || protectedSpots.some((spot) => Math.hypot(x - spot.x, z - spot.z) < 2.8)));
+    const scale = 0.65 + random() * 0.8;
+    const scaleX = scale * (0.8 + random() * 0.5);
+    const scaleZ = scale * (0.8 + random() * 0.5);
+    random(); // rotationX
+    random(); // rotationY
+    random(); // rotationZ
+    const zone = Math.min(5, Math.floor((z + 52.5) / 17.5));
+    rocks.push({ x, z, radius: 1.25 * Math.max(scaleX, scaleZ), top: 1.93 * scale });
+    if (zone === 1 || zone === 4) {
+      random(); // moving-rock direction
+      random(); // moving-rock speed
+    }
+  }
+  return rocks;
+}
+const shotBlockingRocks = createShotBlockingRocks();
+
+function shotHitsRock(origin, direction, distance) {
+  return shotBlockingRocks.some((rock) => {
+    const along = (rock.x - origin.x) * direction.x + (rock.z - origin.z) * direction.z;
+    if (along <= 0 || along >= distance) return false;
+    const x = origin.x + direction.x * along;
+    const z = origin.z + direction.z * along;
+    const y = origin.y + direction.y * along;
+    return (x - rock.x) ** 2 + (z - rock.z) ** 2 <= rock.radius ** 2 && y <= rock.top + 0.25;
+  });
+}
+
 function getRoundState(now = Date.now()) {
   if (roundStartedAt === null) {
     return {
@@ -815,7 +862,8 @@ io.on("connection", (socket) => {
       const distanceSquared =
         offset.x ** 2 + offset.y ** 2 + offset.z ** 2 - projection ** 2;
       const hitRadius = firedType === "bazooka" ? 1.8 : 0.85;
-      if (projection > 0 && projection < 65 && distanceSquared < hitRadius ** 2) {
+      const blockedByRock = projection > 0 && shotHitsRock(origin, aimDirection, projection);
+      if (!blockedByRock && projection > 0 && projection < 65 && distanceSquared < hitRadius ** 2) {
         damagePlayer(
           target,
           firedType === "bazooka" ? 100 : firedType === "pistol" ? 28 : 16,
