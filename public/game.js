@@ -1524,6 +1524,14 @@ function createPlayer(id, state) {
       const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.19, 0.12), camo);
       pouch.position.set(side * 0.24, 0.05, -0.225);
       torso.add(pouch);
+      const woolShoulder = new THREE.Mesh(sphere, fur);
+      woolShoulder.position.set(side * 0.48, 0.38, -0.015);
+      woolShoulder.scale.set(0.19, 0.21, 0.21);
+      torso.add(woolShoulder);
+      const camoPatch = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.11, 0.025), clothAccent);
+      camoPatch.position.set(side * 0.08, 0.12, -0.22);
+      camoPatch.rotation.z = side * 0.28;
+      vest.add(camoPatch);
     }
   } else {
     // A narrow chest and loose, low-slung denim silhouette keep the wolf agile.
@@ -1550,15 +1558,16 @@ function createPlayer(id, state) {
 
   if (isWolf) {
     addHeadPart(sphere, face, [0, 0, 0], [0.32, 0.31, 0.3]);
-    addHeadPart(sphere, muzzle, [0, -0.12, -0.23], [0.22, 0.16, 0.23]);
-    addHeadPart(new THREE.SphereGeometry(0.075, 8, 6), nose, [0, -0.08, -0.42]);
+    addHeadPart(sphere, muzzle, [0, -0.12, -0.26], [0.205, 0.15, 0.31]);
+    addHeadPart(sphere, darkFur, [0, -0.215, -0.205], [0.19, 0.065, 0.2]);
+    addHeadPart(new THREE.SphereGeometry(0.075, 8, 6), nose, [0, -0.08, -0.56]);
     for (const side of [-1, 1]) {
       addHeadPart(
-        new THREE.ConeGeometry(0.12, 0.35, 5),
+        new THREE.ConeGeometry(0.15, 0.48, 5),
         darkFur,
-        [side * 0.2, 0.31, 0.015],
+        [side * 0.21, 0.34, 0.015],
         [1, 1, 0.8],
-        [0, 0, side * -0.18]
+        [0, 0, side * -0.12]
       );
       addHeadPart(sphere, eyeWhite, [side * 0.16, 0.04, -0.245], [0.075, 0.08, 0.045]);
       addHeadPart(sphere, eyeDark, [side * 0.16, 0.035, -0.284], [0.035, 0.045, 0.022]);
@@ -1603,11 +1612,16 @@ function createPlayer(id, state) {
     root.add(leg);
     const pantsMaterial = isWolf ? denim : camo;
     const thigh = new THREE.Mesh(
-      new THREE.CylinderGeometry(isWolf ? 0.18 : 0.23, isWolf ? 0.2 : 0.25, 0.5, 7),
+      new THREE.CylinderGeometry(isWolf ? 0.22 : 0.25, isWolf ? 0.24 : 0.27, 0.56, 7),
       pantsMaterial
     );
     thigh.position.y = -0.23;
     leg.add(thigh);
+    if (isWolf) {
+      const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.27, 0.18), denimLight);
+      pocket.position.set(x < 0 ? -0.19 : 0.19, -0.24, -0.015);
+      leg.add(pocket);
+    }
     if (isWolf) {
       const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.22, 0.12, 7), denimLight);
       cuff.position.y = -0.45;
@@ -1785,6 +1799,7 @@ function updatePlayerAnimations(delta) {
       arms[0].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase) * (sprinting ? 0.95 : 0.52);
       arms[1].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase + Math.PI) * (sprinting ? 0.95 : 0.52);
       arms.forEach((arm) => { arm.elbow.rotation.x = sprinting ? -0.85 : -0.28; });
+      player.userData.torso.position.y = 1.12 + Math.abs(Math.sin(player.userData.gaitPhase * 2)) * (sprinting ? 0.09 : 0.035);
     } else {
       legs[0].rotation.x += (0 - legs[0].rotation.x) * Math.min(1, delta * 8);
       legs[1].rotation.x += (0 - legs[1].rotation.x) * Math.min(1, delta * 8);
@@ -1793,6 +1808,7 @@ function updatePlayerAnimations(delta) {
         arm.shoulder.rotation.x += (0 - arm.shoulder.rotation.x) * Math.min(1, delta * 8);
         arm.elbow.rotation.x += (0 - arm.elbow.rotation.x) * Math.min(1, delta * 8);
       });
+      player.userData.torso.position.y += (1.12 - player.userData.torso.position.y) * Math.min(1, delta * 10);
     }
     const pickup = player.userData.pickupAnimation;
     if (pickup > 0) {
@@ -1807,7 +1823,8 @@ function updatePlayerAnimations(delta) {
       arms[1].shoulder.rotation.z = -0.18;
       arms[1].elbow.rotation.x = -0.65 * reach * recover;
     } else {
-      player.userData.torso.rotation.x += (0 - player.userData.torso.rotation.x) * Math.min(1, delta * 8);
+      const leanTarget = sprinting ? -0.2 : speed > 0.12 ? -0.055 : 0;
+      player.userData.torso.rotation.x += (leanTarget - player.userData.torso.rotation.x) * Math.min(1, delta * 8);
       player.userData.torso.rotation.z = speed > 0.12 ? Math.sin(player.userData.gaitPhase) * 0.055 : 0;
       arms[1].shoulder.rotation.z += (0 - arms[1].shoulder.rotation.z) * Math.min(1, delta * 8);
     }
