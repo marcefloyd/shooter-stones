@@ -1467,7 +1467,7 @@ function createPlayer(id, state) {
   const isSheep = !isWolf;
   root.userData.species = isWolf ? "wolf" : "sheep";
   const fur = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x6d8793 : 0xefeae0,
+    color: isWolf ? 0x718896 : 0xe8e3d8,
     roughness: 0.78,
     metalness: 0.04,
     flatShading: true
@@ -1488,6 +1488,11 @@ function createPlayer(id, state) {
   const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xf4eee0, roughness: 0.7 });
   const eyeDark = new THREE.MeshStandardMaterial({ color: 0x171b20, roughness: 0.5 });
   const nose = new THREE.MeshStandardMaterial({ color: 0x202328, roughness: 0.68 });
+  const denim = new THREE.MeshStandardMaterial({ color: 0x263e69, roughness: 0.82, flatShading: true });
+  const denimLight = new THREE.MeshStandardMaterial({ color: 0x41618b, roughness: 0.78 });
+  const camo = new THREE.MeshStandardMaterial({ color: 0x536344, roughness: 0.92, flatShading: true });
+  const tactical = new THREE.MeshStandardMaterial({ color: 0x343b35, roughness: 0.76, flatShading: true });
+  const clothAccent = new THREE.MeshStandardMaterial({ color: isWolf ? 0x9c754d : 0x8e7652, roughness: 0.8 });
 
   const addPart = (geometry, material, position, scale) => {
     const mesh = new THREE.Mesh(geometry, material);
@@ -1500,11 +1505,36 @@ function createPlayer(id, state) {
   };
   const sphere = new THREE.SphereGeometry(1, 10, 8);
 
-  addPart(sphere, fur, [0, 1.05, 0], [0.42, 0.58, 0.31]);
+  const torso = new THREE.Group();
+  torso.position.set(0, 1.12, 0);
+  root.add(torso);
+  const torsoMesh = new THREE.Mesh(sphere, fur);
+  torsoMesh.position.y = 0.12;
+  torsoMesh.scale.set(isWolf ? 0.36 : 0.53, isWolf ? 0.54 : 0.62, isWolf ? 0.3 : 0.36);
+  torso.add(torsoMesh);
+  if (isSheep) {
+    // Broad shoulders and a fitted tactical vest emphasize the sheep's powerful build.
+    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.25, 0.42), fur);
+    shoulders.position.set(0, 0.48, 0);
+    torso.add(shoulders);
+    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.58, 0.38), tactical);
+    vest.position.set(0, 0.16, -0.012);
+    torso.add(vest);
+    for (const side of [-1, 1]) {
+      const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.19, 0.12), camo);
+      pouch.position.set(side * 0.24, 0.05, -0.225);
+      torso.add(pouch);
+    }
+  } else {
+    // A narrow chest and loose, low-slung denim silhouette keep the wolf agile.
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.13, 0.34), clothAccent);
+    belt.position.set(0, -0.47, 0);
+    torso.add(belt);
+  }
 
   const head = new THREE.Group();
-  head.position.set(0, 1.77, -0.02);
-  root.add(head);
+  head.position.set(0, 0.76, -0.02);
+  torso.add(head);
   const addHeadPart = (geometry, material, position, scale, rotation) => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(position[0], position[1], position[2]);
@@ -1533,7 +1563,7 @@ function createPlayer(id, state) {
       addHeadPart(sphere, eyeWhite, [side * 0.16, 0.04, -0.245], [0.075, 0.08, 0.045]);
       addHeadPart(sphere, eyeDark, [side * 0.16, 0.035, -0.284], [0.035, 0.045, 0.022]);
     }
-    const tail = addPart(new THREE.ConeGeometry(0.13, 0.5, 7), darkFur, [0, 1.15, 0.39]);
+    const tail = addPart(new THREE.ConeGeometry(0.13, 0.5, 7), darkFur, [0, 1.08, 0.39]);
     tail.rotation.x = Math.PI / 2.25;
   } else {
     addHeadPart(sphere, face, [0, -0.015, -0.035], [0.26, 0.3, 0.25]);
@@ -1562,49 +1592,77 @@ function createPlayer(id, state) {
     ]) {
       addPart(sphere, fur, [x, y, z], [0.19, 0.19, 0.19]);
     }
-    addPart(sphere, fur, [0, 1.15, 0.39], [0.16, 0.18, 0.17]);
+    addPart(sphere, fur, [0, 1.0, 0.39], [0.16, 0.18, 0.17]);
   }
 
   const legs = [];
+  const lowerLegs = [];
   for (const x of [-0.2, 0.2]) {
     const leg = new THREE.Group();
-    leg.position.set(x, 0.72, 0);
+    leg.position.set(x * (isWolf ? 1 : 1.38), 0.62, 0);
     root.add(leg);
+    const pantsMaterial = isWolf ? denim : camo;
     const thigh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13, 0.16, 0.48, 8),
-      isSheep ? fur : darkFur
+      new THREE.CylinderGeometry(isWolf ? 0.18 : 0.23, isWolf ? 0.2 : 0.25, 0.5, 7),
+      pantsMaterial
     );
-    thigh.position.y = -0.22;
+    thigh.position.y = -0.23;
     leg.add(thigh);
-    const shin = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.1, 0.12, 0.32, 8),
-      darkFur
-    );
-    shin.position.set(0, -0.56, 0);
+    if (isWolf) {
+      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.22, 0.12, 7), denimLight);
+      cuff.position.y = -0.45;
+      leg.add(cuff);
+    } else {
+      const kneePad = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.12), tactical);
+      kneePad.position.set(0, -0.38, -0.15);
+      leg.add(kneePad);
+    }
+    const shin = new THREE.Group();
+    shin.position.set(0, -0.47, 0);
     leg.add(shin);
+    const shinMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 0.34, 7), isWolf ? denim : camo);
+    shinMesh.position.y = -0.17;
+    shin.add(shinMesh);
     const foot = new THREE.Mesh(sphere, isSheep ? nose : darkFur);
-    foot.position.set(0, -0.73, -0.08);
+    foot.position.set(0, -0.35, -0.1);
     foot.scale.set(0.16, 0.1, 0.23);
-    leg.add(foot);
+    shin.add(foot);
     legs.push(leg);
+    lowerLegs.push(shin);
   }
   root.userData.legs = legs;
+  root.userData.lowerLegs = lowerLegs;
+  root.userData.torso = torso;
   root.userData.gaitPhase = Math.random() * Math.PI * 2;
   root.userData.lastAnimationPosition = root.position.clone();
 
+  const arms = [];
   for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.1, 0.13, 0.48, 8),
-      fur
-    );
-    arm.position.set(side * 0.36, 1.22, -0.015);
-    arm.rotation.z = side * -0.22;
-    root.add(arm);
+    const arm = new THREE.Group();
+    arm.position.set(side * (isWolf ? 0.32 : 0.48), 0.5, 0);
+    torso.add(arm);
+    const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(isWolf ? 0.105 : 0.16, isWolf ? 0.13 : 0.19, 0.43, 7), fur);
+    upperArm.position.y = -0.2;
+    arm.add(upperArm);
+    if (isSheep) {
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.16, 0.18, 7), tactical);
+      sleeve.position.y = -0.07;
+      arm.add(sleeve);
+    }
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.4;
+    arm.add(elbow);
+    const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.11, 0.34, 7), isSheep ? fur : darkFur);
+    forearm.position.y = -0.16;
+    elbow.add(forearm);
     const paw = new THREE.Mesh(sphere, isSheep ? nose : darkFur);
-    paw.position.set(side * 0.4, 0.98, -0.02);
+    paw.position.set(0, -0.35, -0.035);
     paw.scale.set(0.13, 0.11, 0.14);
-    root.add(paw);
+    elbow.add(paw);
+    arms.push({ shoulder: arm, elbow });
   }
+  root.userData.arms = arms;
+  root.userData.pickupAnimation = 0;
 
   const heldRifle = createRifle();
   heldRifle.position.set(0.38, 1.12, -0.48);
@@ -1714,18 +1772,48 @@ function updatePlayerAnimations(delta) {
     const speed = delta > 0 ? distance / delta : 0;
     previous.copy(player.position);
     const legs = player.userData.legs;
+    const lowerLegs = player.userData.lowerLegs;
+    const arms = player.userData.arms;
+    const sprinting = speed > 5.2;
     if (speed > 0.12 && player.position.y < 0.1) {
-      player.userData.gaitPhase += delta * Math.min(13, 5 + speed * 0.8);
-      const stride = Math.min(0.62, speed * 0.075);
+      player.userData.gaitPhase += delta * (sprinting ? 17 : 10);
+      const stride = sprinting ? 0.92 : 0.58;
       legs[0].rotation.x = Math.sin(player.userData.gaitPhase) * stride;
       legs[1].rotation.x = Math.sin(player.userData.gaitPhase + Math.PI) * stride;
+      lowerLegs[0].rotation.x = Math.max(0, -Math.sin(player.userData.gaitPhase)) * (sprinting ? 1.05 : 0.42);
+      lowerLegs[1].rotation.x = Math.max(0, Math.sin(player.userData.gaitPhase)) * (sprinting ? 1.05 : 0.42);
+      arms[0].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase) * (sprinting ? 0.95 : 0.52);
+      arms[1].shoulder.rotation.x = -Math.sin(player.userData.gaitPhase + Math.PI) * (sprinting ? 0.95 : 0.52);
+      arms.forEach((arm) => { arm.elbow.rotation.x = sprinting ? -0.85 : -0.28; });
     } else {
       legs[0].rotation.x += (0 - legs[0].rotation.x) * Math.min(1, delta * 8);
       legs[1].rotation.x += (0 - legs[1].rotation.x) * Math.min(1, delta * 8);
+      lowerLegs.forEach((leg) => { leg.rotation.x += (0 - leg.rotation.x) * Math.min(1, delta * 9); });
+      arms.forEach((arm) => {
+        arm.shoulder.rotation.x += (0 - arm.shoulder.rotation.x) * Math.min(1, delta * 8);
+        arm.elbow.rotation.x += (0 - arm.elbow.rotation.x) * Math.min(1, delta * 8);
+      });
+    }
+    const pickup = player.userData.pickupAnimation;
+    if (pickup > 0) {
+      player.userData.pickupAnimation = Math.max(0, pickup - delta);
+      const phase = 1 - player.userData.pickupAnimation / 0.72;
+      const reach = Math.sin(Math.min(1, phase * 1.65) * Math.PI / 2);
+      const recover = phase > 0.6 ? 1 - THREE.MathUtils.smoothstep(phase, 0.6, 1) : 1;
+      player.userData.torso.rotation.x = -0.24 * reach * recover;
+      legs[0].rotation.x += 0.3 * reach * recover;
+      legs[1].rotation.x += 0.3 * reach * recover;
+      arms[1].shoulder.rotation.x = -1.05 * reach * recover;
+      arms[1].shoulder.rotation.z = -0.18;
+      arms[1].elbow.rotation.x = -0.65 * reach * recover;
+    } else {
+      player.userData.torso.rotation.x += (0 - player.userData.torso.rotation.x) * Math.min(1, delta * 8);
+      player.userData.torso.rotation.z = speed > 0.12 ? Math.sin(player.userData.gaitPhase) * 0.055 : 0;
+      arms[1].shoulder.rotation.z += (0 - arms[1].shoulder.rotation.z) * Math.min(1, delta * 8);
     }
     if (player.scale.y < 0.8) {
-      legs[0].rotation.x = Math.min(legs[0].rotation.x, -0.12);
-      legs[1].rotation.x = Math.min(legs[1].rotation.x, -0.12);
+      legs[0].rotation.x = Math.min(legs[0].rotation.x, -0.2);
+      legs[1].rotation.x = Math.min(legs[1].rotation.x, -0.2);
     }
   });
 }
@@ -2127,6 +2215,7 @@ function pickUpNearbyItem() {
   if (!pickup) {
     return;
   }
+  localPlayer.userData.pickupAnimation = 0.72;
   const events = {
     grenade: "grenade:pickup",
     rifle: "rifle:pickup",
