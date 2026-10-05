@@ -8,7 +8,7 @@
       content="Shooter Stones: combate táctico multijugador en una arena 3D"
     />
     <title>Shooter Stones</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/style.css?v=20261005-1" />
   </head>
   <body>
     <canvas id="game-canvas" aria-label="Arena 3D"></canvas>
@@ -23,10 +23,13 @@
           <button id="play-button" class="play-button" type="button">
             <span>JUGAR</span><span aria-hidden="true">→</span>
           </button>
-          <button id="practice-button" class="practice-button" type="button">
+          <button id="training-button" class="practice-button" type="button">
+            SALA DE ENTRENAMIENTO
+          </button>
+          <button id="ai-training-button" class="practice-button" type="button">
             PRACTICAR CONTRA IA
           </button>
-          <p class="menu-hint">PARTIDA 1 VS 1 · 4 FASES DE 1 MINUTO</p>
+          <p class="menu-hint">JUGAR · MEJOR DE 3 &nbsp;|&nbsp; ENTRENAMIENTO · PARTIDA ÚNICA · IA</p>
         </section>
 
         <aside class="menu-controls" aria-label="Controles del juego">
@@ -42,7 +45,7 @@
           <div class="menu-control-row"><kbd>ALT</kbd><span>Ver personaje de frente</span></div>
           <div class="menu-control-row"><kbd>E</kbd><span>Recoger armas</span></div>
           <div class="menu-control-row"><kbd>Q</kbd><span>Soltar arma actual</span></div>
-          <div class="menu-control-row"><kbd>V</kbd><span>Alternar arma / cuchillo</span></div>
+          <div class="menu-control-row"><kbd>V</kbd><span>Alternar arma / machete</span></div>
           <div class="menu-control-row"><kbd>RMB</kbd><span>Mira 1.ª persona con zoom</span></div>
           <div class="menu-control-row"><kbd>LMB</kbd><span>Disparar / lanzar / atacar</span></div>
         </aside>
@@ -50,6 +53,11 @@
       <footer class="menu-footer">
         <span>SHOOTER STONES</span>
         <span>EL CAMPO DE BATALLA TE ESPERA</span>
+        <a class="asset-credit" href="https://sketchfab.com/3d-models/muro-vikingo-fdddbc83d3604c98a193a5a8b852b05a" target="_blank" rel="noreferrer">MURO VIKINGO: FABIANMESSI · CC BY 4.0</a>
+        <a class="asset-credit" href="https://sketchfab.com/3d-models/barcode-machete-e3e3efb43edd4257afca9ee227c5299e" target="_blank" rel="noreferrer">MACHETE: MILACETIOUS · CC BY 4.0</a>
+        <a class="asset-credit" href="https://sketchfab.com/3d-models/pistola-ec7f4bd2203e44168384dde604f89c91" target="_blank" rel="noreferrer">PISTOLA: LEODM · CC BY 4.0</a>
+        <a class="asset-credit" href="https://sketchfab.com/3d-models/pistola-9mm-ce79e3dbdb4542aaaaef0afff7bb0914" target="_blank" rel="noreferrer">PISTOLA 9MM: EDUARDO.SALAS · CC BY 4.0</a>
+        <a class="asset-credit" href="https://sketchfab.com/3d-models/classic-m4-a747ebdbb3d941ecb09b459c62865a75" target="_blank" rel="noreferrer">M4: JEANDIZ · CC BY 4.0</a>
       </footer>
     </main>
 
@@ -71,7 +79,7 @@
           <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Mover</span><kbd>MOUSE</kbd><span>Mirar</span></p>
           <p><kbd>SHIFT</kbd><span>Correr</span><kbd>CTRL</kbd><span>Agacharse</span><kbd>ESPACIO</kbd><span>Saltar</span></p>
           <p><kbd>F</kbd><span>Rodar</span><kbd>ALT</kbd><span>Vista frontal</span></p>
-          <p><kbd>E</kbd><span>Recoger</span><kbd>Q</kbd><span>Soltar arma</span><kbd>V</kbd><span>Arma / cuchillo</span></p>
+          <p><kbd>E</kbd><span>Recoger</span><kbd>Q</kbd><span>Soltar arma</span><kbd>V</kbd><span>Arma / machete</span></p>
           <p><kbd>RMB</kbd><span>Apuntar</span><kbd>LMB</kbd><span>Disparar / lanzar / atacar</span></p>
         </div>
       </div>
@@ -90,7 +98,17 @@
       <p id="pickup-prompt" class="pickup-prompt" hidden>
         <kbd>E</kbd> RECOGER ARMA
       </p>
-      <div id="round-result" class="round-result" hidden role="status"></div>
+      <section id="round-result" class="round-result" hidden role="status">
+        <div id="round-result-text"></div>
+        <div id="end-menu-actions" class="end-menu-actions" hidden>
+          <button id="restart-match-button" class="end-menu-button" type="button">
+            REINICIAR PARTIDA
+          </button>
+          <button id="return-menu-button" class="end-menu-button is-secondary" type="button">
+            VOLVER AL MENÚ
+          </button>
+        </div>
+      </section>
       <section class="health-panel" aria-label="Estado del jugador">
         <div class="health-heading">
           <span class="eyebrow">VITALIDAD</span>
@@ -116,6 +134,6 @@
       }
     </script>
     <script src="/socket.io/socket.io.js"></script>
-    <script type="module" src="/game.js?v=20261004-19"></script>
+    <script type="module" src="/game.js?v=20261005-45"></script>
   </body>
 </html>

@@ -10,6 +10,9 @@ const PORT = process.env.PORT || 3000;
 const ROUND_DURATION = 4 * 60 * 1000;
 const PHASE_DURATION = 60 * 1000;
 const ESCAPE_WINDOW_DURATION = 5 * 1000;
+const SERIES_MAX_ROUNDS = 3;
+const SERIES_WINS_NEEDED = 2;
+const SERIES_INTERMISSION_MS = 5000;
 
 const FIELD = {
   minX: -33.5,
@@ -24,17 +27,25 @@ const grenades = new Map();
 const rifles = new Map();
 const pistols = new Map();
 const knives = new Map();
+const playerRockSnapshots = new Map();
+const grenadeTimers = new Set();
 const ZONE_LENGTH = (FIELD.maxZ - FIELD.minZ) / 6;
 let roundStartedAt = null;
 let roundEndedAt = null;
 let lastObservedPhase = 0;
 let matchMode = null;
+let matchBestOfThree = false;
+let seriesRoundNumber = 1;
+let seriesWins = new Map();
+let seriesRestartTimer = null;
 
 function createPlayer(id, position, yaw, isAI = false) {
   return {
     id,
     position,
     yaw,
+    spawnPosition: { ...position },
+    spawnYaw: yaw,
     phaseSide: position.z < 0 ? -1 : 1,
     crouching: false,
     aiming: false,
@@ -118,11 +129,31 @@ function createShotBlockingRocks() {
     const scale = 0.65 + random() * 0.8;
     const scaleX = scale * (0.8 + random() * 0.5);
     const scaleZ = scale * (0.8 + random() * 0.5);
-    random(); // rotationX
-    random(); // rotationY
-    random(); // rotationZ
+    const rotationX = random() * 0.35;
+    const rotationY = random() * Math.PI;
+    const rotationZ = random() * 0.35;
+    const halfX = 1.4 * scaleX;
+    const halfY = 0.85 * scale;
+    const halfZ = 0.375 * scaleZ;
+    const c1 = Math.cos(rotationX / 2);
+    const c2 = Math.cos(rotationY / 2);
+    const c3 = Math.cos(rotationZ / 2);
+    const s1 = Math.sin(rotationX / 2);
+    const s2 = Math.sin(rotationY / 2);
+    const s3 = Math.sin(rotationZ / 2);
     const zone = Math.min(5, Math.floor((z + 52.5) / 17.5));
-    rocks.push({ x, z, radius: 1.25 * Math.max(scaleX, scaleZ), top: 1.93 * scale });
+    rocks.push({
+      x,
+      y: 0.85 * scale,
+      z,
+      qx: s1 * c2 * c3 + c1 * s2 * s3,
+      qy: c1 * s2 * c3 - s1 * c2 * s3,
+      qz: c1 * c2 * s3 + s1 * s2 * c3,
+      qw: c1 * c2 * c3 - s1 * s2 * s3,
+      halfX,
+      halfY,
+      halfZ
+    });
     if (zone === 1 || zone === 4) {
       random(); // moving-rock direction
       random(); // moving-rock speed
@@ -132,15 +163,80 @@ function createShotBlockingRocks() {
 }
 const shotBlockingRocks = createShotBlockingRocks();
 
-function shotHitsRock(origin, direction, distance) {
-  return shotBlockingRocks.some((rock) => {
-    const along = (rock.x - origin.x) * direction.x + (rock.z - origin.z) * direction.z;
-    if (along <= 0 || along >= distance) return false;
-    const x = origin.x + direction.x * along;
-    const z = origin.z + direction.z * along;
-    const y = origin.y + direction.y * along;
-    return (x - rock.x) ** 2 + (z - rock.z) ** 2 <= rock.radius ** 2 && y <= rock.top + 0.25;
-  });
+function getShotOrigin(player, crouching = player.crouching) {
+  const muzzleX = 0.38;
+  const muzzleZ = -0.7;
+  return {
+    x: player.position.x + muzzleX * Math.cos(player.yaw) + muzzleZ * Math.sin(player.yaw),
+    y: player.position.y + (crouching ? 0.82 : 1.25),
+    z: player.position.z - muzzleX * Math.sin(player.yaw) + muzzleZ * Math.cos(player.yaw)
+  };
+}
+
+function shotRockHitDistance(origin, direction, distance, playerId) {
+  const rocks = playerRockSnapshots.get(playerId) || shotBlockingRocks;
+  let nearestHit = Infinity;
+  for (const rock of rocks) {
+    const inverseQuaternion = {
+      x: -rock.qx,
+      y: -rock.qy,
+      z: -rock.qz,
+      w: rock.qw
+    };
+    const rotate = (vector) => {
+      const tx = 2 * (inverseQuaternion.y * vector.z - inverseQuaternion.z * vector.y);
+      const ty = 2 * (inverseQuaternion.z * vector.x - inverseQuaternion.x * vector.z);
+      const tz = 2 * (inverseQuaternion.x * vector.y - inverseQuaternion.y * vector.x);
+      return {
+        x: vector.x + inverseQuaternion.w * tx + inverseQuaternion.y * tz - inverseQuaternion.z * ty,
+        y: vector.y + inverseQuaternion.w * ty + inverseQuaternion.z * tx - inverseQuaternion.x * tz,
+        z: vector.z + inverseQuaternion.w * tz + inverseQuaternion.x * ty - inverseQuaternion.y * tx
+      };
+    };
+    const localOrigin = rotate({
+      x: origin.x - rock.x,
+      y: origin.y - rock.y,
+      z: origin.z - rock.z
+    });
+    const localDirection = rotate(direction);
+    let near = 0;
+    let far = distance;
+    let intersects = true;
+    for (const [axis, halfExtent] of [
+      ["x", rock.halfX],
+      ["y", rock.halfY],
+      ["z", rock.halfZ]
+    ]) {
+      if (Math.abs(localDirection[axis]) < 1e-8) {
+        if (Math.abs(localOrigin[axis]) > halfExtent) {
+          intersects = false;
+          break;
+        }
+        continue;
+      }
+      let first = (-halfExtent - localOrigin[axis]) / localDirection[axis];
+      let second = (halfExtent - localOrigin[axis]) / localDirection[axis];
+      if (first > second) [first, second] = [second, first];
+      near = Math.max(near, first);
+      far = Math.min(far, second);
+      if (near > far) {
+        intersects = false;
+        break;
+      }
+    }
+    if (intersects && far > 0 && near < distance) {
+      nearestHit = Math.min(nearestHit, Math.max(0, near));
+    }
+  }
+  return nearestHit;
+}
+
+function getShotDamage(weaponType, distanceSquared) {
+  if (weaponType === "bazooka") {
+    const distanceFromBlastCenter = Math.sqrt(Math.max(0, distanceSquared));
+    return Math.round(100 * (1 - distanceFromBlastCenter / 4.5));
+  }
+  return weaponType === "pistol" ? 28 : 16;
 }
 
 function getRoundState(now = Date.now()) {
@@ -247,6 +343,112 @@ function emitRoundState() {
   io.emit("round:state", getRoundState());
 }
 
+function getSeriesState(complete = false, winner = null) {
+  return {
+    enabled: matchBestOfThree,
+    roundNumber: seriesRoundNumber,
+    maxRounds: SERIES_MAX_ROUNDS,
+    scores: Object.fromEntries(seriesWins),
+    complete,
+    winner
+  };
+}
+
+function restoreInitialPickups() {
+  for (const [pickupMap, initialItems] of [
+    [grenades, initialPickups.grenades],
+    [rifles, initialPickups.rifles],
+    [pistols, initialPickups.pistols],
+    [knives, initialPickups.knives]
+  ]) {
+    pickupMap.clear();
+    initialItems.forEach((item) => pickupMap.set(item.id, item));
+  }
+}
+
+function clearGrenadeTimers() {
+  for (const timer of grenadeTimers) {
+    clearTimeout(timer);
+  }
+  grenadeTimers.clear();
+}
+
+function resetPlayersForRound() {
+  clearGrenadeTimers();
+  restoreInitialPickups();
+  for (const player of players.values()) {
+    player.position = { ...player.spawnPosition };
+    player.yaw = player.spawnYaw;
+    player.crouching = false;
+    player.aiming = false;
+    player.rolling = false;
+    player.grenadeCount = 0;
+    player.health = 100;
+    player.hasKnife = false;
+    player.knifeEquipped = false;
+    player.weaponType = null;
+    player.weaponAmmo = 0;
+    player.lastShotAt = 0;
+    player.lastGrenadeThrowAt = 0;
+    player.lastKnifeAt = 0;
+    player.lastWeaponDropAt = 0;
+    player.nextAiActionAt = 0;
+  }
+  roundStartedAt = Date.now();
+  roundEndedAt = null;
+  lastObservedPhase = 0;
+}
+
+function getRoundStartedPayload() {
+  return {
+    round: getRoundState(),
+    series: getSeriesState(),
+    players: Array.from(players.values()),
+    grenades: Array.from(grenades.values()),
+    rifles: Array.from(rifles.values()),
+    pistols: Array.from(pistols.values()),
+    knives: Array.from(knives.values())
+  };
+}
+
+function startNextSeriesRound() {
+  seriesRestartTimer = null;
+  if (!matchBestOfThree || players.size !== 2 || roundEndedAt === null) {
+    return;
+  }
+  seriesRoundNumber += 1;
+  resetPlayersForRound();
+  io.emit("series:round-started", getRoundStartedPayload());
+}
+
+function restartMatch() {
+  if (players.size !== 2) {
+    return false;
+  }
+  if (roundEndedAt === null) {
+    // Si el cliente reintenta porque perdió el evento de reinicio, reenviamos
+    // el estado ya iniciado para que pueda sincronizarse sin reiniciar el reloj.
+    io.emit("match:restarted", getRoundStartedPayload());
+    return true;
+  }
+  if (seriesRestartTimer) {
+    clearTimeout(seriesRestartTimer);
+    seriesRestartTimer = null;
+  }
+  seriesRoundNumber = 1;
+  seriesWins = new Map();
+  if (matchBestOfThree) {
+    for (const player of players.values()) {
+      if (!player.isAI) {
+        seriesWins.set(player.id, 0);
+      }
+    }
+  }
+  resetPlayersForRound();
+  io.emit("match:restarted", getRoundStartedPayload());
+  return true;
+}
+
 function finishRound() {
   if (roundEndedAt !== null || roundStartedAt === null) {
     return;
@@ -256,7 +458,7 @@ function finishRound() {
     id,
     health
   }));
-  const winner =
+  const roundWinner =
     standings.length < 2
       ? standings[0]?.id || null
       : standings[0].health === standings[1].health
@@ -264,7 +466,35 @@ function finishRound() {
         : standings[0].health > standings[1].health
           ? standings[0].id
           : standings[1].id;
-  io.emit("round:ended", { winner, standings });
+  if (!matchBestOfThree) {
+    io.emit("round:ended", { winner: roundWinner, roundWinner, standings });
+    emitRoundState();
+    return;
+  }
+
+  if (roundWinner !== null) {
+    seriesWins.set(roundWinner, (seriesWins.get(roundWinner) || 0) + 1);
+  }
+  const isComplete =
+    Array.from(seriesWins.values()).some((wins) => wins >= SERIES_WINS_NEEDED) ||
+    seriesRoundNumber >= SERIES_MAX_ROUNDS;
+  const scoreEntries = Array.from(seriesWins.entries());
+  const seriesWinner = !isComplete
+    ? null
+    : scoreEntries.length < 2 || scoreEntries[0][1] === scoreEntries[1][1]
+      ? null
+      : scoreEntries[0][1] > scoreEntries[1][1]
+        ? scoreEntries[0][0]
+        : scoreEntries[1][0];
+  io.emit("round:ended", {
+    winner: isComplete ? seriesWinner : roundWinner,
+    roundWinner,
+    standings,
+    series: getSeriesState(isComplete, seriesWinner)
+  });
+  if (!isComplete) {
+    seriesRestartTimer = setTimeout(startNextSeriesRound, SERIES_INTERMISSION_MS);
+  }
   emitRoundState();
 }
 
@@ -346,7 +576,8 @@ function throwGrenade(player, direction) {
     io.to(player.id).emit("grenade:inventory", { count: player.grenadeCount });
   }
   io.emit("grenade:thrown", grenade);
-  setTimeout(() => {
+  const timer = setTimeout(() => {
+    grenadeTimers.delete(timer);
     const position = predictGrenadeImpact(grenade);
     for (const target of players.values()) {
       if (
@@ -360,6 +591,7 @@ function throwGrenade(player, direction) {
     }
     io.emit("grenade:exploded", { id, position });
   }, 4000);
+  grenadeTimers.add(timer);
   return true;
 }
 
@@ -449,10 +681,12 @@ function aiFireAtTarget(bot, target, now) {
   if (now - bot.lastShotAt < fireDelay || bot.weaponAmmo < 1) {
     return;
   }
+  // Coincide con la boca del arma que usa el cliente para dibujar el proyectil.
+  const origin = getShotOrigin(bot, false);
   const offset = {
-    x: target.position.x - bot.position.x,
-    y: target.position.y + 1 - (bot.position.y + 1.25),
-    z: target.position.z - bot.position.z
+    x: target.position.x - origin.x,
+    y: target.position.y + 1 - origin.y,
+    z: target.position.z - origin.z
   };
   const magnitude = Math.hypot(offset.x, offset.y, offset.z);
   if (magnitude < 0.001) {
@@ -463,6 +697,7 @@ function aiFireAtTarget(bot, target, now) {
     y: offset.y / magnitude,
     z: offset.z / magnitude
   };
+  const rockHitDistance = shotRockHitDistance(origin, direction, magnitude, target.id);
   bot.lastShotAt = now;
   bot.weaponAmmo -= 1;
   const firedType = bot.weaponType;
@@ -478,10 +713,32 @@ function aiFireAtTarget(bot, target, now) {
     ammo: bot.weaponAmmo,
     weaponType: firedType,
     knifeEquipped: bot.knifeEquipped,
-    direction
+    direction,
+    rockHitDistance: Number.isFinite(rockHitDistance) ? rockHitDistance : null
   });
-  if (magnitude < 42) {
-    damagePlayer(target, firedType === "bazooka" ? 100 : firedType === "pistol" ? 16 : 12, firedType, bot.id);
+  const offsetToTarget = {
+    x: target.position.x - origin.x,
+    y: target.position.y + 1 - origin.y,
+    z: target.position.z - origin.z
+  };
+  const projection =
+    offsetToTarget.x * direction.x +
+    offsetToTarget.y * direction.y +
+    offsetToTarget.z * direction.z;
+  const distanceSquared =
+    offsetToTarget.x ** 2 +
+    offsetToTarget.y ** 2 +
+    offsetToTarget.z ** 2 -
+    projection ** 2;
+  const hitRadius = firedType === "bazooka" ? 4.5 : 0.85;
+  const blockedByRock = projection > 0 && Number.isFinite(rockHitDistance);
+  if (
+    !blockedByRock &&
+    projection > 0 &&
+    projection < 65 &&
+    distanceSquared < hitRadius ** 2
+  ) {
+    damagePlayer(target, getShotDamage(firedType, distanceSquared), firedType, bot.id);
   }
 }
 
@@ -690,10 +947,39 @@ function enterRoundPhase(phase) {
 app.use(express.static(path.join(__dirname, "public")));
 
 io.on("connection", (socket) => {
+  socket.on("arena:rocks", (rocks) => {
+    if (!Array.isArray(rocks) || rocks.length !== 72) return;
+    const snapshot = rocks.filter((rock) =>
+      rock &&
+      Number.isFinite(rock.x) &&
+      Number.isFinite(rock.y) &&
+      Number.isFinite(rock.z) &&
+      Number.isFinite(rock.qx) &&
+      Number.isFinite(rock.qy) &&
+      Number.isFinite(rock.qz) &&
+      Number.isFinite(rock.qw) &&
+      Number.isFinite(rock.halfX) &&
+      Number.isFinite(rock.halfY) &&
+      Number.isFinite(rock.halfZ) &&
+      Math.abs(rock.x) <= 40 &&
+      Math.abs(rock.y) < 4 &&
+      Math.abs(rock.z) <= 60 &&
+      rock.halfX > 0 && rock.halfX < 4 &&
+      rock.halfY > 0 && rock.halfY < 4 &&
+      rock.halfZ > 0 && rock.halfZ < 4
+    );
+    if (snapshot.length === 72) {
+      playerRockSnapshots.set(socket.id, snapshot);
+    }
+  });
+
   const requestedMode = socket.handshake.query.mode === "ai" ? "ai" : "online";
+  const requestedBestOfThree =
+    requestedMode === "online" && socket.handshake.query.series === "bo3";
   if (
     players.size >= 2 ||
-    (players.size > 0 && requestedMode !== matchMode)
+    (players.size > 0 &&
+      (requestedMode !== matchMode || requestedBestOfThree !== matchBestOfThree))
   ) {
     socket.emit("game:full");
     socket.disconnect(true);
@@ -702,6 +988,13 @@ io.on("connection", (socket) => {
 
   if (players.size === 0) {
     matchMode = requestedMode;
+    matchBestOfThree = requestedBestOfThree;
+    seriesRoundNumber = 1;
+    seriesWins = new Map();
+    if (seriesRestartTimer) {
+      clearTimeout(seriesRestartTimer);
+      seriesRestartTimer = null;
+    }
   }
   const isNorthSpawn = players.size === 0;
   const player = createPlayer(
@@ -711,9 +1004,13 @@ io.on("connection", (socket) => {
   );
 
   players.set(socket.id, player);
+  if (matchBestOfThree && !seriesWins.has(player.id)) {
+    seriesWins.set(player.id, 0);
+  }
   if (requestedMode === "ai") {
     const bot = createPlayer(
       "ai-opponent",
+      // Igual que un segundo jugador, la IA empieza en el extremo opuesto.
       { x: 0, y: 0, z: FIELD.maxZ - 4 },
       0,
       true
@@ -733,9 +1030,21 @@ io.on("connection", (socket) => {
     rifles: Array.from(rifles.values()),
     pistols: Array.from(pistols.values()),
     knives: Array.from(knives.values()),
-    round: getRoundState()
+    round: getRoundState(),
+    series: getSeriesState()
   });
   socket.broadcast.emit("player:joined", player);
+
+  socket.on("match:restart", (respond) => {
+    if (!restartMatch()) {
+      respond?.({
+        ok: false,
+        message: "No hay un rival conectado para reiniciar la partida."
+      });
+      return;
+    }
+    respond?.({ ok: true });
+  });
 
   socket.on("player:move", (state) => {
     const { position, yaw, crouching, aiming = false, rolling = false } = state || {};
@@ -826,6 +1135,15 @@ io.on("connection", (socket) => {
       currentPlayer.weaponType = null;
       currentPlayer.knifeEquipped = currentPlayer.hasKnife;
     }
+    const origin = getShotOrigin(currentPlayer);
+    // Todas las réplicas reciben el mismo punto de impacto para que el
+    // proyectil no dependa de pequeñas diferencias entre las rocas locales.
+    const rockHitDistance = shotRockHitDistance(
+      origin,
+      aimDirection,
+      130,
+      socket.id
+    );
     io.emit("player:shot", {
       id: socket.id,
       position: currentPlayer.position,
@@ -834,7 +1152,8 @@ io.on("connection", (socket) => {
       ammo: currentPlayer.weaponAmmo,
       weaponType: firedType,
       knifeEquipped: currentPlayer.knifeEquipped,
-      direction: aimDirection
+      direction: aimDirection,
+      rockHitDistance: Number.isFinite(rockHitDistance) ? rockHitDistance : null
     });
     socket.emit("weapon:inventory", {
       type: currentPlayer.weaponType,
@@ -845,11 +1164,6 @@ io.on("connection", (socket) => {
       (candidate) => candidate.id !== socket.id && candidate.health > 0
     );
     if (target) {
-      const origin = {
-        x: currentPlayer.position.x,
-        y: currentPlayer.position.y + (currentPlayer.crouching ? 0.82 : 1.25),
-        z: currentPlayer.position.z
-      };
       const offset = {
         x: target.position.x - origin.x,
         y: target.position.y + 1 - origin.y,
@@ -861,12 +1175,15 @@ io.on("connection", (socket) => {
         offset.z * aimDirection.z;
       const distanceSquared =
         offset.x ** 2 + offset.y ** 2 + offset.z ** 2 - projection ** 2;
-      const hitRadius = firedType === "bazooka" ? 1.8 : 0.85;
-      const blockedByRock = projection > 0 && shotHitsRock(origin, aimDirection, projection);
+      const hitRadius = firedType === "bazooka" ? 4.5 : 0.85;
+      const blockedByRock =
+        projection > 0 &&
+        Number.isFinite(rockHitDistance) &&
+        rockHitDistance < projection;
       if (!blockedByRock && projection > 0 && projection < 65 && distanceSquared < hitRadius ** 2) {
         damagePlayer(
           target,
-          firedType === "bazooka" ? 100 : firedType === "pistol" ? 28 : 16,
+          getShotDamage(firedType, distanceSquared),
           firedType,
           currentPlayer.id
         );
@@ -1038,25 +1355,34 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    playerRockSnapshots.delete(socket.id);
     players.delete(socket.id);
     if (matchMode === "ai") {
       players.delete("ai-opponent");
     }
+    if (seriesRestartTimer) {
+      clearTimeout(seriesRestartTimer);
+      seriesRestartTimer = null;
+    }
+    if (matchMode === "online" && players.size === 1) {
+      const remainingId = players.keys().next().value;
+      io.to(remainingId).emit("match:closed", {
+        reason: "El otro jugador salió de la partida."
+      });
+      playerRockSnapshots.delete(remainingId);
+      players.clear();
+    }
     io.emit("player:left", { id: socket.id });
     if (players.size === 0) {
+      clearGrenadeTimers();
       roundStartedAt = null;
       roundEndedAt = null;
       lastObservedPhase = 0;
       matchMode = null;
-      for (const [pickupMap, initialItems] of [
-        [grenades, initialPickups.grenades],
-        [rifles, initialPickups.rifles],
-        [pistols, initialPickups.pistols],
-        [knives, initialPickups.knives]
-      ]) {
-        pickupMap.clear();
-        initialItems.forEach((item) => pickupMap.set(item.id, item));
-      }
+      matchBestOfThree = false;
+      seriesRoundNumber = 1;
+      seriesWins = new Map();
+      restoreInitialPickups();
       emitRoundState();
     }
   });

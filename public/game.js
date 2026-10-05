@@ -7,8 +7,9 @@ const statusElement = document.querySelector("#connection-status");
 const hitFlashElement = document.querySelector("#hit-flash");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#0b1220");
-// Mantener visibles los rivales al otro extremo de la cancha (unos 100 m).
-scene.fog = new THREE.FogExp2("#101826", 0.0035);
+// La cancha mide más de 100 m de punta a punta: sin niebla para que se vea
+// completa, incluyendo el rival y los impactos de larga distancia.
+scene.fog = null;
 
 const camera = new THREE.PerspectiveCamera(
   50,
@@ -344,9 +345,9 @@ centerDisc.receiveShadow = true;
 scene.add(centerDisc);
 
 const wallMaterial = new THREE.MeshStandardMaterial({
-  color: 0x222933,
-  roughness: 0.94,
-  metalness: 0.06,
+  color: 0xd9dee5,
+  roughness: 0.82,
+  metalness: 0.03,
   flatShading: true
 });
 function addPerimeterWall(width, height, depth, x, z) {
@@ -387,9 +388,9 @@ floodPositions.forEach(([x, y, z]) => {
 });
 
 const arenaRng = createArenaRandom(5831);
-const rockGeometry = new THREE.DodecahedronGeometry(1.25, 0);
+const rockGeometry = new THREE.BoxGeometry(2.8, 1.7, 0.75);
 const rockMaterial = new THREE.MeshStandardMaterial({
-  color: 0x8a909c,
+  color: 0x77736c,
   map: rockColorMap,
   roughness: 0.88,
   metalness: 0.08,
@@ -438,8 +439,9 @@ function addArenaRocks(count) {
     const rotationX = arenaRng() * 0.35;
     const rotationY = arenaRng() * Math.PI;
     const rotationZ = arenaRng() * 0.35;
-    const radius = 1.25 * Math.max(scaleX, scaleZ);
-    transform.position.set(x, 0.68 * scale, z);
+    const radius = Math.hypot(1.4 * scaleX, 0.375 * scaleZ) +
+      0.85 * scale * Math.SQRT2 * Math.sin(0.35);
+    transform.position.set(x, 0.85 * scale, z);
     transform.rotation.set(rotationX, rotationY, rotationZ);
     transform.scale.set(
       scaleX,
@@ -457,7 +459,7 @@ function addArenaRocks(count) {
       index: i,
       x,
       z,
-      y: 0.68 * scale,
+      y: 0.85 * scale,
       radius,
       scaleX,
       scaleY: scale,
@@ -465,6 +467,11 @@ function addArenaRocks(count) {
       rotationX,
       rotationZ,
       rotationY,
+      colliderHalfExtents: {
+        x: 1.4 * scaleX,
+        y: 0.85 * scale,
+        z: 0.375 * scaleZ
+      },
       minZ: -halfLength + zoneLength * zoneIndex + radius,
       maxZ: -halfLength + zoneLength * (zoneIndex + 1) - radius,
       minX: -halfWidth + radius,
@@ -484,10 +491,74 @@ function addArenaRocks(count) {
   }
 
   rocks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  rocks.castShadow = true;
-  rocks.receiveShadow = true;
+  // Esta malla detallada se repite 72 veces; evita renderizarla también en el mapa de sombras.
+  rocks.castShadow = false;
+  rocks.receiveShadow = false;
   scene.add(rocks);
   return rocks;
+}
+
+function loadArenaRockModel(instancedRocks) {
+  const loader = new GLTFLoader();
+  loader.load("/assets/modelos/muro_vikingo.glb", (gltf) => {
+    let sourceMesh = null;
+    gltf.scene.traverse((node) => {
+      if (!sourceMesh && node.isMesh) sourceMesh = node;
+    });
+    if (!sourceMesh) {
+      console.error("El modelo del muro no contiene una malla.");
+      return;
+    }
+
+    gltf.scene.updateMatrixWorld(true);
+    const geometry = sourceMesh.geometry.clone();
+    geometry.applyMatrix4(sourceMesh.matrixWorld);
+    geometry.computeBoundingBox();
+    const bounds = geometry.boundingBox;
+    const size = bounds.getSize(new THREE.Vector3());
+    if (!Number.isFinite(size.x) || size.x <= 0 || size.y <= 0 || size.z <= 0) {
+      geometry.dispose();
+      console.error("No se pudieron calcular los límites del modelo de piedra.");
+      return;
+    }
+
+    const center = bounds.getCenter(new THREE.Vector3());
+    geometry.translate(-center.x, -center.y, -center.z);
+    geometry.scale(2.8 / size.x, 1.7 / size.y, 0.75 / size.z);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+
+    const positions = geometry.getAttribute("position");
+    let horizontalRadius = 0;
+    let maximumVerticalExtent = 0;
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const z = positions.getZ(index);
+      horizontalRadius = Math.max(horizontalRadius, Math.hypot(x, z));
+      maximumVerticalExtent = Math.max(maximumVerticalExtent, Math.abs(y));
+    }
+    // Incluye la extensión lateral que aparece al inclinar la roca.
+    const normalizedSize = geometry.boundingBox.getSize(new THREE.Vector3());
+    rockObstacles.forEach((rock) => {
+      rock.colliderHalfExtents = {
+        x: normalizedSize.x * rock.scaleX / 2,
+        y: normalizedSize.y * rock.scaleY / 2,
+        z: normalizedSize.z * rock.scaleZ / 2
+      };
+      rock.radius = Math.hypot(
+        rock.colliderHalfExtents.x,
+        rock.colliderHalfExtents.z
+      ) + rock.colliderHalfExtents.y * Math.SQRT2 * Math.sin(0.35);
+    });
+
+    const previousGeometry = instancedRocks.geometry;
+    instancedRocks.geometry = geometry;
+    instancedRocks.material = sourceMesh.material.clone();
+    previousGeometry.dispose();
+  }, undefined, (error) => {
+    console.error("No se pudo cargar el muro vikingo:", error);
+  });
 }
 
 const propMaterials = {
@@ -574,7 +645,7 @@ function createPickupLabelTexture(type) {
     grenade: "BAZOOKA",
     rifle: "RIFLE",
     pistol: "PISTOLA",
-    knife: "CUCHILLO"
+    knife: "MACHETE"
   };
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -671,7 +742,11 @@ const propGltfTemplates = new Map();
 const propGltfUrls = {
   ak47: "/assets/set3descomprimido/ak47/scene.gltf",
   grenade: "/assets/set3descomprimido/granada/scene.gltf",
-  bazooka: "/assets/set3descomprimido/bazooka/scene.gltf"
+  bazooka: "/assets/set3descomprimido/bazooka/scene.gltf",
+  machete: "/assets/set3descomprimido/barcode_machete/scene.gltf",
+  pistol: "/assets/set3descomprimido/pistola/scene.gltf",
+  pistol9mm: "/assets/set3descomprimido/pistola_9mm/scene.gltf",
+  m4: "/assets/set3descomprimido/classic_m4/scene.gltf"
 };
 
 function addGltfProp(group, fallback, type) {
@@ -698,20 +773,35 @@ function addGltfProp(group, fallback, type) {
       }
     });
 
+    const isPistolModel = type === "pistol" || type === "pistol9mm";
     if (type === "grenade") {
       model.rotation.x = -Math.PI / 2;
+    } else if (type === "machete") {
+      // El modelo tiene la hoja sobre su eje +Z; apunta hacia delante (-Z).
+      model.rotation.y = Math.PI;
+    } else if (type === "m4") {
+      // La M4 tiene el cañón sobre +Z en el archivo descargado.
+      model.rotation.y = Math.PI;
     }
 
     let bounds = new THREE.Box3().setFromObject(model);
     let size = bounds.getSize(new THREE.Vector3());
-    if (type === "ak47" && size.x > size.z) {
+    if ((type === "ak47" || isPistolModel) && size.x > size.z) {
       model.rotation.y = Math.PI / 2;
       bounds = new THREE.Box3().setFromObject(model);
       size = bounds.getSize(new THREE.Vector3());
     }
 
-    const targetSize = type === "ak47" || type === "bazooka" ? 2.2 : 0.76;
-    const measuredSize = type === "ak47" || type === "bazooka" ? Math.max(size.x, size.z) : size.y;
+    const targetSize = type === "ak47" || type === "m4" || type === "bazooka"
+      ? 2.2
+      : isPistolModel
+        ? 0.82
+        : type === "machete"
+          ? 1.08
+          : 0.76;
+    const measuredSize = type === "ak47" || type === "m4" || type === "bazooka" || type === "machete" || isPistolModel
+      ? Math.max(size.x, size.y, size.z)
+      : size.y;
     const scale = targetSize / (measuredSize || 1);
     model.scale.setScalar(scale);
     bounds = new THREE.Box3().setFromObject(model);
@@ -759,18 +849,43 @@ function createGrenade() {
   return grenade;
 }
 
-function createGroundRifle(position) {
-  const rifle = createRifle();
+function rifleVariantForPickup(id) {
+  const spawn = /^rifle-(\d+)-(\d+)$/.exec(String(id));
+  if (spawn) {
+    return (Number(spawn[1]) + Number(spawn[2])) % 2;
+  }
+  let hash = 0;
+  for (const character of String(id || "")) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return hash % 2;
+}
+
+function createGroundRifle(position, pickupId) {
+  const rifle = createRifle(rifleVariantForPickup(pickupId));
   rifle.position.set(position.x, 0.08, position.z);
-  rifle.userData.pickupId = null;
+  rifle.userData.pickupId = pickupId || null;
   addPickupBeacon(rifle, "rifle");
   return rifle;
 }
 
-function createGroundPistol(position) {
-  const pistol = createPistol();
+function pistolVariantForPickup(id) {
+  const spawn = /^pistol-\d+-(\d+)$/.exec(String(id));
+  if (spawn) {
+    // El modelo más pesado aparece solo una vez por franja central.
+    return Number(spawn[1]) === 2 ? 0 : 1;
+  }
+  let hash = 0;
+  for (const character of String(id || "")) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return hash % 2;
+}
+
+function createGroundPistol(position, pickupId) {
+  const pistol = createPistol(pistolVariantForPickup(pickupId));
   pistol.position.set(position.x, 0.05, position.z);
-  pistol.userData.pickupId = null;
+  pistol.userData.pickupId = pickupId || null;
   addPickupBeacon(pistol, "pistol");
   return pistol;
 }
@@ -784,7 +899,7 @@ function createGroundKnife(position) {
   return knife;
 }
 
-function createRifle() {
+function createRifle(variant = 0) {
   const rifle = new THREE.Group();
   const fallback = new THREE.Group();
   rifle.add(fallback);
@@ -819,33 +934,80 @@ function createRifle() {
     propMaterials.rifleAccent,
     [0, 0.34, -0.14]
   );
-  addGltfProp(rifle, fallback, "ak47");
+  addGltfProp(rifle, fallback, variant === 0 ? "ak47" : "m4");
   return rifle;
 }
 
-function createPistol() {
+function createPistol(variant = 1) {
   const pistol = new THREE.Group();
+  const fallback = new THREE.Group();
+  pistol.add(fallback);
   addPropPart(
-    pistol,
+    fallback,
     new THREE.BoxGeometry(0.26, 0.18, 0.62),
     propMaterials.rifle,
     [0, 0.19, -0.04]
   );
   addPropPart(
-    pistol,
+    fallback,
     new THREE.BoxGeometry(0.2, 0.32, 0.2),
     propMaterials.rifleAccent,
     [0, 0.02, 0.16],
     [-0.18, 0, 0]
   );
   addPropPart(
-    pistol,
+    fallback,
     new THREE.CylinderGeometry(0.045, 0.045, 0.38, 6),
     propMaterials.rifle,
     [0, 0.21, -0.48],
     [Math.PI / 2, 0, 0]
   );
+  addGltfProp(pistol, fallback, variant === 0 ? "pistol" : "pistol9mm");
   return pistol;
+}
+
+function setHeldWeaponVariant(player, type, variant) {
+  const isRifle = type === "rifle";
+  const key = isRifle ? "heldRifle" : "heldPistol";
+  const variantKey = isRifle ? "rifleVariant" : "pistolVariant";
+  if (!player || player.userData[variantKey] === variant) {
+    return;
+  }
+
+  const previous = player.userData[key];
+  if (!previous) {
+    player.userData[variantKey] = variant;
+    return;
+  }
+
+  const replacement = isRifle ? createRifle(variant) : createPistol(variant);
+  replacement.position.copy(previous.position);
+  replacement.quaternion.copy(previous.quaternion);
+  replacement.scale.copy(previous.scale);
+  replacement.visible = previous.visible;
+  replacement.userData.weaponVariant = variant;
+
+  const parent = previous.parent || player.userData.characterVisual;
+  parent?.add(replacement);
+  parent?.remove(previous);
+  player.userData[key] = replacement;
+  player.userData[variantKey] = variant;
+
+  const playerId = player.userData.playerId;
+  if (isRifle) {
+    playerRifleVariants.set(playerId, variant);
+  } else {
+    playerPistolVariants.set(playerId, variant);
+  }
+
+  previous.traverse((node) => {
+    if (!node.isMesh) return;
+    node.geometry.dispose();
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    materials.forEach((material) => {
+      if (material && !sharedPropMaterials.has(material)) material.dispose();
+    });
+  });
 }
 
 const knifeBladeShape = new THREE.Shape();
@@ -862,19 +1024,22 @@ const knifeBladeGeometry = new THREE.ExtrudeGeometry(knifeBladeShape, {
 
 function createKnife() {
   const knife = new THREE.Group();
+  const fallback = new THREE.Group();
+  knife.add(fallback);
   addPropPart(
-    knife,
+    fallback,
     new THREE.BoxGeometry(0.24, 0.15, 0.4),
     propMaterials.knifeHandle,
     [0, 0.14, 0.18]
   );
   addPropPart(
-    knife,
+    fallback,
     knifeBladeGeometry,
     propMaterials.knife,
     [0, 0.14, -0.02],
     [-Math.PI / 2, 0, 0]
   );
+  addGltfProp(knife, fallback, "machete");
   return knife;
 }
 
@@ -904,13 +1069,13 @@ function addArenaEquipment() {
     grenadePickups.set(spawn.id, grenade);
   });
   rifleSpawnPoints.forEach((spawn) => {
-    const rifle = createGroundRifle(spawn.position);
+    const rifle = createGroundRifle(spawn.position, spawn.id);
     rifle.userData.pickupId = spawn.id;
     scene.add(rifle);
     riflePickups.set(spawn.id, rifle);
   });
   pistolSpawnPoints.forEach((spawn) => {
-    const pistol = createGroundPistol(spawn.position);
+    const pistol = createGroundPistol(spawn.position, spawn.id);
     pistol.userData.pickupId = spawn.id;
     scene.add(pistol);
     pistolPickups.set(spawn.id, pistol);
@@ -924,11 +1089,14 @@ function addArenaEquipment() {
 }
 
 const arenaRocks = addArenaRocks(72);
+loadArenaRockModel(arenaRocks);
 addArenaEquipment();
 
 let socket = null;
 const keys = new Set();
 const players = new Map();
+const playerRifleVariants = new Map();
+const playerPistolVariants = new Map();
 const playerTargets = new Map();
 const projectiles = [];
 const thrownGrenades = new Map();
@@ -993,6 +1161,11 @@ const fxMaterials = {
   })
 };
 const raycaster = new THREE.Raycaster();
+const projectileColliderEuler = new THREE.Euler();
+const projectileColliderInverseRotation = new THREE.Quaternion();
+const projectileColliderCenter = new THREE.Vector3();
+const projectileColliderOrigin = new THREE.Vector3();
+const projectileColliderDirection = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
 const localRight = new THREE.Vector3(1, 0, 0);
 const moveSpeed = 6.5;
@@ -1015,6 +1188,10 @@ const healthValueElement = document.querySelector("#health-value");
 const healthBarElement = document.querySelector(".health-bar");
 const roundStatusElement = document.querySelector("#round-status");
 const roundResultElement = document.querySelector("#round-result");
+const roundResultTextElement = document.querySelector("#round-result-text");
+const endMenuActionsElement = document.querySelector("#end-menu-actions");
+const restartMatchButton = document.querySelector("#restart-match-button");
+const returnMenuButton = document.querySelector("#return-menu-button");
 const bloodParticles = [];
 const bloodParticleGeometry = new THREE.SphereGeometry(0.065, 5, 4);
 const bloodParticleMaterial = new THREE.MeshBasicMaterial({
@@ -1033,6 +1210,7 @@ const fieldBounds = {
 
 let localPlayerId = null;
 let localPlayer = null;
+let lastRockSyncAt = 0;
 let localPhaseSide = 1;
 let isAiming = false;
 let isDraggingView = false;
@@ -1049,6 +1227,7 @@ let weaponAmmo = 0;
 let hasKnife = false;
 let knifeEquipped = false;
 let roundStartedAt = null;
+let seriesState = { enabled: false, roundNumber: 1, maxRounds: 3, scores: {} };
 let safeRadius = startingZoneRadius;
 let roundPhase = 0;
 let phaseRemainingMs = 0;
@@ -1579,13 +1758,15 @@ function createPlayer(id, state) {
   root.userData.playerId = id;
   root.userData.weaponType = state.weaponType || null;
   root.userData.weaponAmmo = state.weaponAmmo || 0;
+  root.userData.rifleVariant = playerRifleVariants.get(id) ?? 0;
+  root.userData.pistolVariant = playerPistolVariants.get(id) ?? 0;
   root.userData.health = state.health ?? 100;
   root.userData.aiming = Boolean(state.aiming);
   root.userData.crouching = Boolean(state.crouching);
   root.userData.pickupAnimation = 0;
   root.userData.throwAnimation = 0;
   root.userData.jumpAnimation = 0;
-  // El jugador local controla la oveja táctica; el rival se muestra como lobo.
+  // Prueba visual: el jugador local controla al Punk y el rival al Adventurer.
   const isWolf = id !== localPlayerId;
   root.userData.species = isWolf ? "wolf" : "sheep";
 
@@ -1602,38 +1783,92 @@ function createPlayer(id, state) {
 
   // Figura visible mientras llega el GLB (o si el navegador no puede cargarlo).
   const characterFallback = new THREE.Group();
-  const fallbackMaterial = new THREE.MeshStandardMaterial({
-    color: isWolf ? 0x8fcaff : 0xd9d0b8,
-    emissive: isWolf ? 0x276ba0 : 0x000000,
-    emissiveIntensity: isWolf ? 0.55 : 0,
-    transparent: isWolf,
-    opacity: isWolf ? 0.42 : 1,
-    depthWrite: !isWolf,
-    roughness: 0.82
-  });
-  const fallbackBody = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.34, 0.9, 4, 8),
-    fallbackMaterial
-  );
-  fallbackBody.position.y = 0.82;
-  fallbackBody.castShadow = true;
-  characterFallback.add(fallbackBody);
-  const fallbackHead = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 12, 10),
-    fallbackMaterial
-  );
-  fallbackHead.position.y = 1.55;
-  fallbackHead.castShadow = true;
-  characterFallback.add(fallbackHead);
+  if (isWolf) {
+    const fallbackMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8fcaff,
+      emissive: 0x276ba0,
+      emissiveIntensity: 0.55,
+      roughness: 0.82
+    });
+    const fallbackBody = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.34, 0.9, 4, 8),
+      fallbackMaterial
+    );
+    fallbackBody.position.y = 0.82;
+    characterFallback.add(fallbackBody);
+    const fallbackHead = new THREE.Mesh(
+      new THREE.SphereGeometry(0.28, 12, 10),
+      fallbackMaterial
+    );
+    fallbackHead.position.y = 1.55;
+    characterFallback.add(fallbackHead);
+  } else {
+    // Este es el rival procedural de la versión anterior; no depende del rig
+    // del GLB para ser visible mientras se carga el Punk.
+    const fur = new THREE.MeshBasicMaterial({ color: 0xe9e6dc });
+    const face = new THREE.MeshBasicMaterial({ color: 0x3a3c42 });
+    const muzzle = new THREE.MeshBasicMaterial({ color: 0xe6ded0 });
+    const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xf4eee0 });
+    const eyeDark = new THREE.MeshBasicMaterial({ color: 0x171b20 });
+    const nose = new THREE.MeshBasicMaterial({ color: 0x202328 });
+    const sphere = new THREE.SphereGeometry(1, 10, 8);
+    const addSheepPart = (geometry, material, position, scale, parent = characterFallback) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(...position);
+      if (scale) mesh.scale.set(...scale);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+
+    addSheepPart(sphere, fur, [0, 1.05, 0], [0.42, 0.58, 0.31]);
+    const head = new THREE.Group();
+    head.position.set(0, 1.77, -0.02);
+    characterFallback.add(head);
+    addSheepPart(sphere, face, [0, -0.015, -0.035], [0.26, 0.3, 0.25], head);
+    addSheepPart(sphere, muzzle, [0, -0.12, -0.23], [0.16, 0.12, 0.1], head);
+    addSheepPart(sphere, nose, [0, -0.08, -0.315], [0.055, 0.045, 0.035], head);
+    for (const side of [-1, 1]) {
+      addSheepPart(new THREE.ConeGeometry(0.075, 0.24, 6), face,
+        [side * 0.28, 0.03, -0.015], [1, 0.65, 1], head);
+      addSheepPart(sphere, eyeWhite, [side * 0.13, 0.055, -0.235], [0.055, 0.06, 0.035], head);
+      addSheepPart(sphere, eyeDark, [side * 0.13, 0.05, -0.267], [0.027, 0.035, 0.02], head);
+    }
+    for (const [x, y, z] of [
+      [-0.25, 1.2, 0], [0.25, 1.2, 0], [-0.28, 1.02, 0.13],
+      [0.28, 1.02, 0.13], [0, 1.37, 0.04], [-0.19, 1.63, 0.02],
+      [0.19, 1.63, 0.02]
+    ]) {
+      addSheepPart(sphere, fur, [x, y, z], [0.19, 0.19, 0.19]);
+    }
+    addSheepPart(sphere, fur, [0, 1.15, 0.39], [0.16, 0.18, 0.17]);
+    for (const x of [-0.2, 0.2]) {
+      const leg = new THREE.Group();
+      leg.position.set(x, 0.72, 0);
+      characterFallback.add(leg);
+      addSheepPart(new THREE.CylinderGeometry(0.13, 0.16, 0.48, 8), fur,
+        [0, -0.22, 0], null, leg);
+      addSheepPart(new THREE.CylinderGeometry(0.1, 0.12, 0.32, 8), face,
+        [0, -0.56, 0], null, leg);
+      addSheepPart(sphere, nose, [0, -0.73, -0.08], [0.16, 0.1, 0.23], leg);
+    }
+    for (const side of [-1, 1]) {
+      const arm = addSheepPart(new THREE.CylinderGeometry(0.1, 0.13, 0.48, 8), fur,
+        [side * 0.36, 1.22, -0.015]);
+      arm.rotation.z = side * -0.22;
+      addSheepPart(sphere, nose, [side * 0.4, 0.98, -0.02], [0.13, 0.11, 0.14]);
+    }
+  }
   characterVisual.add(characterFallback);
 
-  const heldRifle = createRifle();
+  const heldRifle = createRifle(root.userData.rifleVariant);
   heldRifle.position.set(0.2, 1.0, -0.3);
   heldRifle.visible = state.weaponType === "rifle" && state.weaponAmmo > 0;
   characterVisual.add(heldRifle);
   root.userData.heldRifle = heldRifle;
 
-  const heldPistol = createPistol();
+  const heldPistol = createPistol(root.userData.pistolVariant);
   heldPistol.position.set(0.2, 1.0, -0.2);
   heldPistol.visible = state.weaponType === "pistol" && state.weaponAmmo > 0;
   characterVisual.add(heldPistol);
@@ -1665,6 +1900,32 @@ function createPlayer(id, state) {
 
   scene.add(root);
   players.set(id, root);
+  if (id !== localPlayerId) {
+    const markerCanvas = document.createElement("canvas");
+    markerCanvas.width = 256;
+    markerCanvas.height = 64;
+    const markerContext = markerCanvas.getContext("2d");
+    markerContext.fillStyle = "rgba(7, 17, 25, 0.94)";
+    markerContext.fillRect(8, 6, 240, 52);
+    markerContext.strokeStyle = "#b8f27c";
+    markerContext.lineWidth = 4;
+    markerContext.stroke();
+    markerContext.fillStyle = "#efffdb";
+    markerContext.font = "bold 30px sans-serif";
+    markerContext.textAlign = "center";
+    markerContext.textBaseline = "middle";
+    markerContext.fillText("PUNK", 128, 32);
+    const markerTexture = new THREE.CanvasTexture(markerCanvas);
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: markerTexture,
+      depthTest: false,
+      depthWrite: false,
+      sizeAttenuation: true
+    }));
+    marker.position.set(0, 3, 0);
+    marker.scale.set(8, 2, 1);
+    root.add(marker);
+  }
   
   loadPlayerSoldier(root.userData.species)
     .then((template) => {
@@ -1688,14 +1949,19 @@ function createPlayer(id, state) {
         }
       });
       
-      model.updateMatrixWorld(true);
-      model.traverse((node) => {
-        if (node.isSkinnedMesh) {
-          node.skeleton.update();
-          node.computeBoundingBox();
-        }
-      });
-      const bounds = new THREE.Box3().setFromObject(model);
+      const getStaticMeshBounds = () => {
+        model.updateMatrixWorld(true);
+        const box = new THREE.Box3();
+        model.traverse((node) => {
+          if (!node.isMesh || !node.geometry) return;
+          node.geometry.computeBoundingBox();
+          if (node.geometry.boundingBox) {
+            box.union(node.geometry.boundingBox.clone().applyMatrix4(node.matrixWorld));
+          }
+        });
+        return box;
+      };
+      const bounds = getStaticMeshBounds();
       const size = bounds.getSize(new THREE.Vector3());
       const maxSize = Math.max(size.x, size.y, size.z);
       if (bounds.isEmpty() || !Number.isFinite(maxSize) || maxSize <= 0 || !Number.isFinite(bounds.min.y)) {
@@ -1703,7 +1969,7 @@ function createPlayer(id, state) {
       }
 
       model.scale.setScalar(2.0 / maxSize);
-      model.updateMatrixWorld(true);
+      const scaledBounds = getStaticMeshBounds();
       model.traverse((node) => {
         if (node.isSkinnedMesh) {
           node.skeleton.update();
@@ -1712,16 +1978,13 @@ function createPlayer(id, state) {
       });
       
       // Recalculamos los límites después de escalar para centrarlo y apoyar los pies en el suelo
-      const scaledBounds = new THREE.Box3().setFromObject(model);
       if (scaledBounds.isEmpty() || !Number.isFinite(scaledBounds.min.y)) {
         throw new Error("No se pudieron calcular los límites del modelo escalado.");
       }
       const center = scaledBounds.getCenter(new THREE.Vector3());
       model.position.set(-center.x, -scaledBounds.min.y, -center.z);
-      // Reemplazamos los elementos viejos y posicionamos el modelo 3D correctamente
-      // Conserva una silueta suave del lobo como respaldo visible mientras el
-      // modelo GLB se anima o si alguna parte del rig queda fuera de sus bounds.
-      if (!isWolf) characterVisual.clear();
+      // El respaldo solo queda visible mientras carga o si falla el GLB.
+      characterVisual.clear();
       characterVisual.add(model);
       root.userData.soldierModel = model;
       root.userData.soldierJumpBones = [];
@@ -1734,11 +1997,24 @@ function createPlayer(id, state) {
         }
       });
       root.userData.soldierAirPose = 0;
-      // Las armas quedan en el espacio normalizado del jugador, fuera de la escala del GLB.
-      characterVisual.add(heldRifle);
-      characterVisual.add(heldPistol);
-      characterVisual.add(heldKnife);
+      // Se vuelven a insertar en el jugador antes de vincularlas a la muñeca.
+      const currentHeldRifle = root.userData.heldRifle || heldRifle;
+      const currentHeldPistol = root.userData.heldPistol || heldPistol;
+      const currentHeldBazooka = root.userData.heldBazooka || heldBazooka;
+      const currentHeldKnife = root.userData.heldKnife || heldKnife;
+      characterVisual.add(currentHeldRifle);
+      characterVisual.add(currentHeldPistol);
+      characterVisual.add(currentHeldBazooka);
+      characterVisual.add(currentHeldKnife);
       characterVisual.add(heldGrenade);
+      model.updateMatrixWorld(true);
+      const weaponHand = model.getObjectByName("Wrist.R");
+      if (weaponHand) {
+        root.userData.weaponHand = weaponHand;
+        [currentHeldRifle, currentHeldPistol, currentHeldBazooka, currentHeldKnife].forEach((weapon) => {
+          weaponHand.attach(weapon);
+        });
+      }
 
       if (template.animations.length > 0) {
         const mixer = new THREE.AnimationMixer(model);
@@ -1759,7 +2035,6 @@ function createPlayer(id, state) {
     .catch((error) => {
       console.error("No se pudo cargar el modelo del jugador:", error);
     });
-
   playerTargets.set(id, {
     position: root.position.clone(),
     yaw: root.rotation.y,
@@ -1800,6 +2075,8 @@ function removePlayer(id) {
     }
   });
   players.delete(id);
+  playerRifleVariants.delete(id);
+  playerPistolVariants.delete(id);
   playerTargets.delete(id);
 }
 
@@ -1856,8 +2133,13 @@ function playSoldierAnimation(player, name, oneShot = true) {
 function startPlayerDeathAnimation(player) {
   if (!player || player.userData.deathAnimationScheduled) return;
   player.userData.deathAnimationScheduled = true;
+  const deathRoundStartedAt = roundStartedAt;
   const duration = playSoldierAnimation(player, "Death");
-  window.setTimeout(() => explodePlayer(player), Math.max(0, duration * 1000 - 120));
+  window.setTimeout(() => {
+    if (roundStartedAt === deathRoundStartedAt) {
+      explodePlayer(player);
+    }
+  }, Math.max(0, duration * 1000 - 120));
 }
 
 function updatePlayerAnimations(delta) {
@@ -1868,15 +2150,23 @@ function updatePlayerAnimations(delta) {
         ? Math.hypot(player.position.x - previousPosition.x, player.position.z - previousPosition.z)
         : 0;
       const speed = delta > 0 ? distance / delta : 0;
+      player.userData.animationSpeed = speed;
       let nextName = "Idle_Neutral";
       const actions = player.userData.soldierActions;
+      const hasFirearm = Boolean(
+        player.userData.weaponType &&
+        player.userData.weaponAmmo > 0 &&
+        !player.userData.knifeEquipped
+      );
       const moveX = previousPosition ? player.position.x - previousPosition.x : 0;
       const moveZ = previousPosition ? player.position.z - previousPosition.z : 0;
       const yaw = player.rotation.y;
       const rightMovement = Math.cos(yaw) * moveX - Math.sin(yaw) * moveZ;
       const forwardMovement = -Math.sin(yaw) * moveX - Math.cos(yaw) * moveZ;
       if (performance.now() >= player.userData.soldierForcedUntil) {
-        if (speed >= 0.35 && Math.abs(rightMovement) > Math.abs(forwardMovement)) {
+        if (speed >= 0.35 && player.userData.aiming && hasFirearm && actions.has("Run_Shoot")) {
+          nextName = "Run_Shoot";
+        } else if (speed >= 0.35 && Math.abs(rightMovement) > Math.abs(forwardMovement)) {
           const sideAnimation = rightMovement < 0 ? "Run_Left" : "Run_Right";
           nextName = actions.has(sideAnimation) ? sideAnimation : "Walk";
         } else if (speed >= 0.35 && forwardMovement < 0 && actions.has("Run_Back")) {
@@ -1885,13 +2175,20 @@ function updatePlayerAnimations(delta) {
           nextName = "Run";
         } else if (speed >= 0.35 && actions.has("Walk")) {
           nextName = "Walk";
-        } else if (player.userData.aiming && !player.userData.knifeEquipped && actions.has("Idle_Gun_Pointing")) {
+        } else if (
+          player.userData.aiming &&
+          (player.userData.weaponType === "rifle" || player.userData.weaponType === "bazooka") &&
+          hasFirearm &&
+          actions.has("Idle_Gun")
+        ) {
+          nextName = "Idle_Gun";
+        } else if (player.userData.aiming && hasFirearm && actions.has("Idle_Gun_Pointing")) {
           nextName = "Idle_Gun_Pointing";
         } else if (player.userData.crouching) {
           nextName = actions.has("Idle_Neutral") ? "Idle_Neutral" : "Idle";
         } else if (player.userData.knifeEquipped && actions.has("Idle_Sword")) {
           nextName = "Idle_Sword";
-        } else if (player.userData.weaponType && actions.has("Idle_Gun")) {
+        } else if (hasFirearm && actions.has("Idle_Gun")) {
           nextName = "Idle_Gun";
         } else if (!actions.has(nextName)) {
           nextName = "Idle";
@@ -1946,7 +2243,45 @@ function cameraAimDirection() {
   return raycaster.ray.direction.clone().normalize();
 }
 
-function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType) {
+function projectileHitsRockBox(origin, direction, maxDistance, rock) {
+  projectileColliderCenter.set(rock.x, rock.y, rock.z);
+  projectileColliderInverseRotation
+    .setFromEuler(projectileColliderEuler.set(rock.rotationX, rock.rotationY, rock.rotationZ))
+    .invert();
+  projectileColliderOrigin
+    .copy(origin)
+    .sub(projectileColliderCenter)
+    .applyQuaternion(projectileColliderInverseRotation);
+  projectileColliderDirection
+    .copy(direction)
+    .applyQuaternion(projectileColliderInverseRotation);
+
+  let near = 0;
+  let far = maxDistance;
+  for (let axisIndex = 0; axisIndex < 3; axisIndex += 1) {
+    const axis = axisIndex === 0 ? "x" : axisIndex === 1 ? "y" : "z";
+    const halfExtent = axisIndex === 0
+      ? rock.colliderHalfExtents.x
+      : axisIndex === 1
+        ? rock.colliderHalfExtents.y
+        : rock.colliderHalfExtents.z;
+    const rayComponent = projectileColliderDirection[axis];
+    const originComponent = projectileColliderOrigin[axis];
+    if (Math.abs(rayComponent) < 1e-8) {
+      if (Math.abs(originComponent) > halfExtent) return false;
+      continue;
+    }
+    let first = (-halfExtent - originComponent) / rayComponent;
+    let second = (halfExtent - originComponent) / rayComponent;
+    if (first > second) [first, second] = [second, first];
+    near = Math.max(near, first);
+    far = Math.min(far, second);
+    if (near > far) return false;
+  }
+  return far > 0 && near < maxDistance;
+}
+
+function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType, maxDistance = Infinity) {
   const muzzleOffset = new THREE.Vector3(0.38, crouching ? 0.82 : 1.25, -0.7)
     .applyAxisAngle(worldUp, yaw);
   const origin = new THREE.Vector3(position.x, position.y, position.z).add(muzzleOffset);
@@ -1971,7 +2306,10 @@ function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType) 
     mesh,
     weaponType,
     velocity: direction.clone().multiplyScalar(weaponType === "bazooka" ? 36 : 52),
-    lifetime: weaponType === "bazooka" ? 1.8 : 1.4
+    travelled: 0,
+    maxDistance,
+    // Desde un extremo de la cancha al muro del fondo hay unos 105 m.
+    lifetime: weaponType === "bazooka" ? 3.4 : 1.4
   });
   spawnMuzzleFlash(origin, direction);
   if (id === localPlayerId) {
@@ -1981,7 +2319,9 @@ function fireProjectile(id, position, yaw, crouching, aimDirection, weaponType) 
 
 function setGrenadeCount(count) {
   grenadeCount = count;
-  grenadeCountElement.textContent = String(count);
+  if (grenadeCountElement) {
+    grenadeCountElement.textContent = String(count);
+  }
   if (localPlayer && localPlayer.userData.heldGrenade) {
     localPlayer.userData.heldGrenade.visible = count > 0;
   }
@@ -2000,7 +2340,7 @@ function setWeaponInventory(type, ammo) {
   weaponCapacityElement.textContent =
     weaponType === "rifle" ? "30" : weaponType === "pistol" ? "12" : weaponType === "bazooka" ? "1" : "0";
   weaponStatusElement.textContent = knifeEquipped && hasKnife
-    ? "CUCHILLO"
+    ? "MACHETE"
     : weaponType === "bazooka"
       ? "BAZOOKA"
       : weaponType
@@ -2008,7 +2348,7 @@ function setWeaponInventory(type, ammo) {
       ? "PISTOLA"
       : "RIFLE AUTOMÁTICO"
     : hasKnife
-      ? "CUCHILLO"
+      ? "MACHETE"
       : "SIN ARMA";
   if (localPlayer) {
     localPlayer.userData.weaponType = weaponType;
@@ -2037,7 +2377,7 @@ function setKnifeInventory(hasItem, equipped = hasItem && weaponAmmo === 0) {
   }
   weaponStatusElement.textContent =
     hasItem && knifeEquipped
-      ? "CUCHILLO"
+      ? "MACHETE"
       : weaponType === "pistol"
         ? "PISTOLA"
         : weaponType === "rifle"
@@ -2058,6 +2398,24 @@ function setPlayerHealth(id, health) {
   }
 }
 
+function updateSeriesState(state) {
+  seriesState = state?.enabled
+    ? state
+    : { enabled: false, roundNumber: 1, maxRounds: 3, scores: {} };
+}
+
+function getSeriesStatusText() {
+  if (!seriesState.enabled) {
+    return "";
+  }
+  const scores = seriesState.scores || {};
+  const localWins = Number(scores[localPlayerId] || 0);
+  const opponentWins = Number(
+    Object.entries(scores).find(([id]) => id !== localPlayerId)?.[1] || 0
+  );
+  return ` · MEJOR DE 3 ${localWins}-${opponentWins} · PARTIDA ${seriesState.roundNumber}/${seriesState.maxRounds}`;
+}
+
 function updateRoundState(state) {
   if (!state) {
     return;
@@ -2075,7 +2433,8 @@ function updateRoundState(state) {
   escapeOpen = Boolean(state.escapeOpen);
 
   if (roundPhase === 0) {
-    roundStatusElement.textContent = "ESPERANDO AL SEGUNDO JUGADOR";
+    roundStatusElement.textContent =
+      `ESPERANDO AL SEGUNDO JUGADOR${getSeriesStatusText()}`;
     roundStatusElement.classList.remove("is-warning");
     return;
   }
@@ -2091,8 +2450,8 @@ function updateRoundState(state) {
   const seconds = String(phaseSeconds % 60).padStart(2, "0");
   roundStatusElement.classList.toggle("is-warning", escapeOpen);
   roundStatusElement.textContent = escapeOpen
-    ? `${phaseNames[roundPhase]} · ¡AVANZA! · ${minutes}:${seconds}`
-    : `${phaseNames[roundPhase]} · ${minutes}:${seconds}`;
+    ? `${phaseNames[roundPhase]} · ¡AVANZA! · ${minutes}:${seconds}${getSeriesStatusText()}`
+    : `${phaseNames[roundPhase]} · ${minutes}:${seconds}${getSeriesStatusText()}`;
 }
 
 function updateZoneWarning(now) {
@@ -2196,7 +2555,7 @@ function syncRiflePickups(serverRifles) {
     if (riflePickups.has(id)) {
       return;
     }
-    const pickup = createGroundRifle(rifle.position);
+    const pickup = createGroundRifle(rifle.position, id);
     pickup.userData.pickupId = id;
     scene.add(pickup);
     riflePickups.set(id, pickup);
@@ -2216,7 +2575,7 @@ function syncPistolPickups(serverPistols) {
     if (pistolPickups.has(id)) {
       return;
     }
-    const pickup = createGroundPistol(pistol.position);
+    const pickup = createGroundPistol(pistol.position, id);
     pickup.userData.pickupId = id;
     scene.add(pickup);
     pistolPickups.set(id, pickup);
@@ -2351,8 +2710,8 @@ function addDroppedWeapon({ id, position, type, ammo }) {
   }
   const pickup =
     type === "rifle"
-      ? createGroundRifle(position)
-      : createGroundPistol(position);
+      ? createGroundRifle(position, id)
+      : createGroundPistol(position, id);
   pickup.userData.pickupId = id;
   pickup.userData.ammo = ammo;
   scene.add(pickup);
@@ -2579,8 +2938,149 @@ function sendPlayerState(now) {
   lastMoveSentAt = now;
 }
 
-function connectSocket(mode = "online") {
-  socket = io({ query: { mode } });
+function assignPistolVariants(roster) {
+  playerPistolVariants.clear();
+  roster.forEach((player, index) => {
+    playerPistolVariants.set(player.id, index % 2);
+  });
+}
+
+function assignRifleVariants(roster) {
+  playerRifleVariants.clear();
+  roster.forEach((player, index) => {
+    playerRifleVariants.set(player.id, index % 2);
+  });
+}
+
+function assignJoinedPlayerPistolVariant(playerId) {
+  if (playerPistolVariants.has(playerId)) {
+    return;
+  }
+  const usedVariants = new Set(playerPistolVariants.values());
+  playerPistolVariants.set(playerId, usedVariants.has(0) ? 1 : 0);
+}
+
+function assignJoinedPlayerRifleVariant(playerId) {
+  if (playerRifleVariants.has(playerId)) {
+    return;
+  }
+  const usedVariants = new Set(playerRifleVariants.values());
+  playerRifleVariants.set(playerId, usedVariants.has(0) ? 1 : 0);
+}
+
+function resetForNextSeriesRound(data) {
+  updateSeriesState(data.series);
+  syncGrenadePickups(data.grenades);
+  syncRiflePickups(data.rifles);
+  syncPistolPickups(data.pistols);
+  syncKnifePickups(data.knives);
+  assignRifleVariants(data.players);
+  assignPistolVariants(data.players);
+
+  data.players.forEach((playerData) => {
+    if (playerData.id !== localPlayerId && !players.has(playerData.id)) {
+      addPlayer(playerData);
+    }
+    const player = players.get(playerData.id);
+    if (!player) {
+      return;
+    }
+    player.position.set(
+      playerData.position.x,
+      playerData.position.y || 0,
+      playerData.position.z
+    );
+    player.rotation.y = playerData.yaw || 0;
+    player.scale.set(1, 1, 1);
+    player.visible = true;
+    player.userData.health = playerData.health ?? 100;
+    player.userData.weaponType = null;
+    player.userData.weaponAmmo = 0;
+    player.userData.hasKnife = false;
+    player.userData.knifeEquipped = false;
+    player.userData.aiming = false;
+    player.userData.crouching = false;
+    player.userData.deathAnimationScheduled = false;
+    player.userData.rollStartedAt = 0;
+    player.userData.soldierForcedUntil = 0;
+    player.userData.characterPivot.rotation.set(0, 0, 0);
+    player.userData.heldRifle.visible = false;
+    player.userData.heldPistol.visible = false;
+    player.userData.heldBazooka.visible = false;
+    player.userData.heldKnife.visible = false;
+    player.userData.heldKnife.rotation.set(0, 0, 0);
+    player.userData.heldGrenade.visible = false;
+    updatePlayerTarget(playerData);
+    player.userData.lastAnimationPosition?.copy(player.position);
+    setPlayerHealth(playerData.id, playerData.health ?? 100);
+
+    if (player.userData.soldierActions) {
+      const idleName = player.userData.soldierActions.has("Idle_Neutral")
+        ? "Idle_Neutral"
+        : "Idle";
+      playSoldierAnimation(player, idleName, false);
+    }
+  });
+
+  for (const projectile of projectiles) {
+    scene.remove(projectile.mesh);
+    if (projectile.mesh.isMesh && projectile.mesh.material !== projectileMaterial) {
+      projectile.mesh.material.dispose();
+    }
+  }
+  projectiles.length = 0;
+  thrownGrenades.forEach(({ mesh }) => scene.remove(mesh));
+  thrownGrenades.clear();
+
+  const localData = data.players.find((player) => player.id === localPlayerId);
+  if (localData && localPlayer) {
+    cameraYaw = localData.yaw || 0;
+    localPhaseSide = localData.position.z < 0 ? -1 : 1;
+    verticalVelocity = 0;
+    localPlayer.visible = true;
+  }
+  setKnifeInventory(false, false);
+  setWeaponInventory(null, 0);
+  setGrenadeCount(0);
+  isFiring = false;
+  isAiming = false;
+  keys.clear();
+  document.body.classList.remove("aiming");
+  lastSentState = null;
+  roundResultElement.hidden = true;
+  endMenuActionsElement.hidden = true;
+  restartMatchButton.hidden = false;
+  updateRoundState(data.round);
+  statusElement.textContent = seriesState.enabled
+    ? `Partida ${seriesState.roundNumber}/${seriesState.maxRounds}. ¡A jugar!`
+    : "Partida reiniciada. ¡A jugar!";
+  if (restartRequestTimer !== null) {
+    window.clearTimeout(restartRequestTimer);
+    restartRequestTimer = null;
+  }
+}
+
+function connectSocket(mode = "online", bestOfThree = false) {
+  socket = io({ query: { mode, series: bestOfThree ? "bo3" : "single" } });
+  const showReturnOnlyResult = (message) => {
+    if (restartRequestTimer !== null) {
+      window.clearTimeout(restartRequestTimer);
+      restartRequestTimer = null;
+    }
+    roundEnded = true;
+    isFiring = false;
+    isAiming = false;
+    isDraggingView = false;
+    keys.clear();
+    document.body.classList.remove("aiming");
+    if (document.pointerLockElement && document.exitPointerLock) {
+      document.exitPointerLock();
+    }
+    roundResultElement.hidden = false;
+    roundResultTextElement.textContent = message;
+    restartMatchButton.hidden = true;
+    endMenuActionsElement.hidden = false;
+  };
 
   socket.on("connect", () => {
     statusElement.textContent = "Conectado. Esperando la partida...";
@@ -2594,13 +3094,24 @@ function connectSocket(mode = "online") {
     statusElement.textContent = "La partida ya tiene dos jugadores.";
   });
 
+  socket.on("match:restart-rejected", () => {
+    showReturnOnlyResult("NO HAY RIVAL PARA REINICIAR LA PARTIDA");
+  });
+
+  socket.on("match:closed", ({ reason } = {}) => {
+    showReturnOnlyResult(reason || "LA PARTIDA SE CERRÓ");
+  });
+
   socket.on("game:state", (state) => {
     localPlayerId = state.playerId;
+    assignRifleVariants(state.players);
+    assignPistolVariants(state.players);
     const localData = state.players.find((player) => player.id === localPlayerId);
     syncGrenadePickups(state.grenades);
     syncRiflePickups(state.rifles);
     syncPistolPickups(state.pistols);
     syncKnifePickups(state.knives);
+    updateSeriesState(state.series);
     updateRoundState(state.round);
 
     if (localData) {
@@ -2626,6 +3137,8 @@ function connectSocket(mode = "online") {
   });
 
   socket.on("player:joined", (player) => {
+    assignJoinedPlayerRifleVariant(player.id);
+    assignJoinedPlayerPistolVariant(player.id);
     addPlayer(player);
     statusElement.textContent = "¡El segundo jugador se unió!";
   });
@@ -2655,12 +3168,20 @@ function connectSocket(mode = "online") {
       shot.yaw,
       shot.crouching,
       shot.direction,
-      shot.weaponType
+      shot.weaponType,
+      Number.isFinite(shot.rockHitDistance) ? shot.rockHitDistance : Infinity
     );
     playShotSound(shot.weaponType, shot.position);
     const shooter = players.get(shot.id);
     if (shooter) {
-      if (!shot.knifeEquipped) playSoldierAnimation(shooter, "Gun_Shoot");
+      if (!shot.knifeEquipped) {
+        const moving = (shooter.userData.animationSpeed || 0) >= 0.35;
+        const preferredShotAnimation = moving ? "Run_Shoot" : "Idle_Gun_Shoot";
+        const shotAnimation = shooter.userData.soldierActions?.has(preferredShotAnimation)
+          ? preferredShotAnimation
+          : "Gun_Shoot";
+        playSoldierAnimation(shooter, shotAnimation);
+      }
       shooter.userData.weaponType = shot.ammo > 0 ? shot.weaponType : null;
       shooter.userData.weaponAmmo = shot.ammo;
       shooter.userData.heldRifle.visible =
@@ -2680,16 +3201,55 @@ function connectSocket(mode = "online") {
 
   socket.on("round:state", updateRoundState);
 
-  socket.on("round:ended", ({ winner }) => {
+  socket.on("series:round-started", resetForNextSeriesRound);
+  socket.on("match:restarted", resetForNextSeriesRound);
+
+  socket.on("round:ended", ({ winner, roundWinner = winner, series }) => {
     roundEnded = true;
     isFiring = false;
     roundResultElement.hidden = false;
-    roundResultElement.textContent =
-      winner === null
-        ? "EMPATE"
-        : winner === localPlayerId
-          ? "¡VICTORIA!"
-          : "DERROTA";
+    endMenuActionsElement.hidden = false;
+    restartMatchButton.hidden = false;
+    isAiming = false;
+    isDraggingView = false;
+    keys.clear();
+    document.body.classList.remove("aiming");
+    if (document.pointerLockElement && document.exitPointerLock) {
+      document.exitPointerLock();
+    }
+    if (series?.enabled) {
+      updateSeriesState(series);
+      const scores = series.scores || {};
+      const localWins = Number(scores[localPlayerId] || 0);
+      const opponentWins = Number(
+        Object.entries(scores).find(([id]) => id !== localPlayerId)?.[1] || 0
+      );
+      const scoreText = `MARCADOR ${localWins}-${opponentWins}`;
+      if (series.complete) {
+        roundResultTextElement.textContent =
+          series.winner === null
+            ? `SERIE EMPATADA\n${scoreText}`
+            : series.winner === localPlayerId
+              ? `¡SERIE GANADA!\n${scoreText}`
+              : `SERIE PERDIDA\n${scoreText}`;
+      } else {
+        const roundResult =
+          roundWinner === null
+            ? "EMPATE EN ESTA PARTIDA"
+            : roundWinner === localPlayerId
+              ? "GANASTE ESTA PARTIDA"
+              : "PERDISTE ESTA PARTIDA";
+        roundResultTextElement.textContent =
+          `PARTIDA ${series.roundNumber}/${series.maxRounds}\n${roundResult}\n${scoreText}\nSIGUIENTE PARTIDA EN UNOS SEGUNDOS`;
+      }
+    } else {
+      roundResultTextElement.textContent =
+        winner === null
+          ? "EMPATE"
+          : winner === localPlayerId
+            ? "¡VICTORIA!"
+            : "DERROTA";
+    }
   });
 
   socket.on("player:health", ({ id, health, source }) => {
@@ -2759,6 +3319,11 @@ function connectSocket(mode = "online") {
     }
     const player = players.get(playerId);
     if (player) {
+      if (type === "rifle") {
+        setHeldWeaponVariant(player, type, rifleVariantForPickup(id));
+      } else if (type === "pistol") {
+        setHeldWeaponVariant(player, type, pistolVariantForPickup(id));
+      }
       player.userData.knifeEquipped = false;
       player.userData.weaponType = type;
       player.userData.weaponAmmo = ammo || (type === "rifle" ? 30 : 12);
@@ -3257,6 +3822,9 @@ function updateRemotePlayers(delta) {
     if (!root) {
       return;
     }
+    // El servidor es la fuente de vida del jugador; evita que un estado
+    // visual de eliminación deje oculto a un rival que sigue activo.
+    root.visible = root.userData.health > 0;
     root.position.lerp(target.position, Math.min(1, delta * 12));
     const yawDifference = Math.atan2(
       Math.sin(target.yaw - root.rotation.y),
@@ -3281,7 +3849,15 @@ function updateProjectiles(delta) {
   for (let i = projectiles.length - 1; i >= 0; i -= 1) {
     const projectile = projectiles[i];
     const previousPosition = projectile.mesh.position.clone();
-    projectile.mesh.position.addScaledVector(projectile.velocity, delta);
+    const projectileSpeed = projectile.velocity.length();
+    const requestedDistance = projectileSpeed * delta;
+    const remainingDistance = Math.max(0, projectile.maxDistance - projectile.travelled);
+    const stepDistance = Math.min(requestedDistance, remainingDistance);
+    projectile.mesh.position.addScaledVector(
+      projectile.velocity,
+      projectileSpeed > 0 ? stepDistance / projectileSpeed : 0
+    );
+    projectile.travelled += stepDistance;
     projectile.lifetime -= delta;
     projectile.mesh.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 0, 1),
@@ -3289,18 +3865,21 @@ function updateProjectiles(delta) {
     );
 
     const hitGround = projectile.mesh.position.y <= 0.04;
-    const segmentX = projectile.mesh.position.x - previousPosition.x;
-    const segmentZ = projectile.mesh.position.z - previousPosition.z;
-    const segmentLengthSquared = segmentX * segmentX + segmentZ * segmentZ;
-    const hitRock = rockObstacles.some((rock) => {
-      const along = segmentLengthSquared > 0
-        ? THREE.MathUtils.clamp(((rock.x - previousPosition.x) * segmentX + (rock.z - previousPosition.z) * segmentZ) / segmentLengthSquared, 0, 1)
-        : 0;
-      const closestX = previousPosition.x + segmentX * along;
-      const closestZ = previousPosition.z + segmentZ * along;
-      const closestY = previousPosition.y + (projectile.mesh.position.y - previousPosition.y) * along;
-      return (closestX - rock.x) ** 2 + (closestZ - rock.z) ** 2 <= (rock.radius + 0.14) ** 2 && closestY <= rock.y + rock.scaleY * 1.25;
-    });
+    const segment = projectile.mesh.position.clone().sub(previousPosition);
+    const segmentLength = segment.length();
+    const segmentDirection = segmentLength > 0
+      ? segment.multiplyScalar(1 / segmentLength)
+      : null;
+    const serverForcedImpact = Number.isFinite(projectile.maxDistance) &&
+      projectile.travelled >= projectile.maxDistance - 1e-4;
+    const hitRock = serverForcedImpact || (segmentLength > 0 && rockObstacles.some((rock) =>
+      projectileHitsRockBox(
+        previousPosition,
+        segmentDirection,
+        segmentLength,
+        rock
+      )
+    ));
     const hitWall = Math.abs(projectile.mesh.position.x) >= halfWidth || Math.abs(projectile.mesh.position.z) >= halfLength;
     const outOfBounds =
       projectile.lifetime <= 0 ||
@@ -3419,7 +3998,7 @@ function updateGrenades(delta, now) {
     bazooka: "RECOGER BAZOOKA",
       rifle: "RECOGER RIFLE (30)",
       pistol: "RECOGER PISTOLA (12)",
-      knife: "RECOGER CUCHILLO"
+      knife: "RECOGER MACHETE"
     };
     grenadePickupPrompt.innerHTML = `E ${promptLabels[nearbyPickup.kind]}`;
   }
@@ -3474,11 +4053,31 @@ function updateGrenades(delta, now) {
 }
 
 function animate() {
-  requestAnimationFrame(animate);
+  animationFrameId = requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
 
   updateMovingRocks(delta);
+  if (socket?.connected && now - lastRockSyncAt >= 200) {
+    lastRockSyncAt = now;
+    socket.emit("arena:rocks", rockObstacles.map((rock) => {
+      const quaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(rock.rotationX, rock.rotationY, rock.rotationZ)
+      );
+      return {
+        x: rock.x,
+        y: rock.y,
+        z: rock.z,
+        qx: quaternion.x,
+        qy: quaternion.y,
+        qz: quaternion.z,
+        qw: quaternion.w,
+        halfX: rock.colliderHalfExtents.x,
+        halfY: rock.colliderHalfExtents.y,
+        halfZ: rock.colliderHalfExtents.z
+      };
+    }));
+  }
   resolvePlayerRockOverlaps();
   updateMovement(delta, now);
   updateCamera(delta);
@@ -3496,9 +4095,12 @@ function animate() {
 
 const mainMenu = document.querySelector("#main-menu");
 const playButton = document.querySelector("#play-button");
-const practiceButton = document.querySelector("#practice-button");
+const trainingButton = document.querySelector("#training-button");
+const aiTrainingButton = document.querySelector("#ai-training-button");
 const gameUI = document.querySelector("#game-ui");
 let gameStarted = false;
+let animationFrameId = null;
+let restartRequestTimer = null;
 
 soundToggle.addEventListener("click", () => {
   audioMuted = !audioMuted;
@@ -3514,7 +4116,7 @@ soundToggle.addEventListener("click", () => {
   }
 });
 
-function startGame(mode) {
+function startGame(mode, bestOfThree = false) {
   if (gameStarted) {
     return;
   }
@@ -3524,8 +4126,10 @@ function startGame(mode) {
   document.body.classList.add("game-started");
   gameUI.setAttribute("aria-hidden", "false");
   mainMenu.classList.add("is-closing");
-  connectSocket(mode);
-  animate();
+  connectSocket(mode, bestOfThree);
+  if (animationFrameId === null) {
+    animate();
+  }
 
   if (canvas.requestPointerLock) {
     try {
@@ -3547,11 +4151,93 @@ function startGame(mode) {
   });
 }
 
-playButton.addEventListener("click", () => startGame("online"));
-practiceButton.addEventListener("click", () => startGame("ai"));
+function returnToMainMenu() {
+  if (restartRequestTimer !== null) {
+    window.clearTimeout(restartRequestTimer);
+    restartRequestTimer = null;
+  }
+  if (document.pointerLockElement && document.exitPointerLock) {
+    document.exitPointerLock();
+  }
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+  for (const id of [...players.keys()]) {
+    removePlayer(id);
+  }
+  for (const projectile of projectiles) {
+    scene.remove(projectile.mesh);
+    if (projectile.mesh.isMesh && projectile.mesh.material !== projectileMaterial) {
+      projectile.mesh.material.dispose();
+    }
+  }
+  projectiles.length = 0;
+  thrownGrenades.forEach(({ mesh }) => scene.remove(mesh));
+  thrownGrenades.clear();
+  playerRifleVariants.clear();
+  playerPistolVariants.clear();
+  localPlayer = null;
+  localPlayerId = null;
+  playerTargets.clear();
+  seriesState = { enabled: false, roundNumber: 1, maxRounds: 3, scores: {} };
+  roundStartedAt = null;
+  roundPhase = 0;
+  roundEnded = false;
+  isAiming = false;
+  isDraggingView = false;
+  isFiring = false;
+  keys.clear();
+  document.body.classList.remove("game-started", "aiming", "low-health");
+  gameUI.classList.remove("is-visible");
+  gameUI.setAttribute("aria-hidden", "true");
+  roundResultElement.hidden = true;
+  endMenuActionsElement.hidden = true;
+  restartMatchButton.hidden = false;
+  mainMenu.hidden = false;
+  mainMenu.classList.remove("is-closing");
+  gameStarted = false;
+}
+
+restartMatchButton.addEventListener("click", () => {
+  if (!socket?.connected) {
+    returnToMainMenu();
+    return;
+  }
+  endMenuActionsElement.hidden = true;
+  roundResultTextElement.textContent = "REINICIANDO PARTIDA...";
+  restartRequestTimer = window.setTimeout(() => {
+    restartRequestTimer = null;
+    roundResultTextElement.textContent =
+      "NO SE PUDO CONFIRMAR EL REINICIO. INTENTÁ OTRA VEZ.";
+    restartMatchButton.hidden = false;
+    endMenuActionsElement.hidden = false;
+  }, 5000);
+  socket.emit("match:restart", (result) => {
+    if (result?.ok === false) {
+      showReturnOnlyResult(
+        result.message || "NO SE PUDO REINICIAR LA PARTIDA"
+      );
+    }
+  });
+});
+
+returnMenuButton.addEventListener("click", returnToMainMenu);
+
+playButton.addEventListener("click", () => startGame("online", true));
+trainingButton.addEventListener("click", () => startGame("online"));
+aiTrainingButton.addEventListener("click", () => startGame("ai"));
 
 mainMenu.addEventListener("transitionend", (event) => {
-  if (event.target === mainMenu && event.propertyName === "opacity") {
+  if (
+    event.target === mainMenu &&
+    event.propertyName === "opacity" &&
+    mainMenu.classList.contains("is-closing")
+  ) {
     mainMenu.hidden = true;
   }
 });
